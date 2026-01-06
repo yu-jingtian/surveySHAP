@@ -65,8 +65,9 @@ shap_strength_main_group <- function(shap_feat, feature_names = colnames(shap_fe
   if (is.null(feat_group)) {
     feat_group <- feature_to_group(feature_names)
   }
+
   mean_abs <- colMeans(abs(shap_feat))
-  strength <- stats::tapply(mean_abs, feat_group, sum, na.rm = TRUE)
+  strength <- tapply(mean_abs, feat_group, sum, na.rm = TRUE)
 
   df <- data.frame(
     group = names(strength),
@@ -75,6 +76,7 @@ shap_strength_main_group <- function(shap_feat, feature_names = colnames(shap_fe
   )
   df[order(-df$strength), , drop = FALSE]
 }
+
 
 #' Active SHAP direction table for a categorical variable
 #'

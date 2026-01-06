@@ -22,7 +22,7 @@ A list with \code{df} (cleaned data), \code{X} (dgCMatrix), \code{y} (numeric),
 and \code{feature_names} (character).
 }
 \description{
-This mirrors your script:
+Mirrors the analysis script:
 \itemize{
 \item outcome \code{gun_control} is numeric
 \item covariates are treated as factors

@@ -12,7 +12,7 @@ full_dummy_contrasts <- function(f) {
 
 #' Build the XGBoost modeling frame and sparse design matrix
 #'
-#' This mirrors your script:
+#' Mirrors the analysis script:
 #' - outcome `gun_control` is numeric
 #' - covariates are treated as factors
 #' - rows with missing values are removed
@@ -32,21 +32,23 @@ build_xgb_design <- function(
   stopifnot(is.data.frame(data))
   stopifnot(is.character(y_col), length(y_col) == 1)
   stopifnot(is.character(x_cols), length(x_cols) >= 1)
+
   missing_cols <- setdiff(c(y_col, x_cols), names(data))
   if (length(missing_cols) > 0) {
     stop("Missing columns in `data`: ", paste(missing_cols, collapse = ", "))
   }
 
-  # Clean modeling dataset (factorize covariates)
-  df <- dplyr::transmute(
-    data,
-    y = as.numeric(.data[[y_col]]),
-    !!!rlang::set_names(
-      lapply(x_cols, function(nm) as.factor(.data[[nm]])),
-      x_cols
-    )
-  )
+  # Construct modeling df using base subsetting (package-safe)
+  df <- data[, c(y_col, x_cols), drop = FALSE]
+  names(df)[1] <- "y"
+  df$y <- as.numeric(df$y)
 
+  # factorize covariates
+  for (nm in x_cols) {
+    df[[nm]] <- as.factor(df[[nm]])
+  }
+
+  # complete cases + drop unused levels
   df <- df[stats::complete.cases(df), , drop = FALSE]
   df <- droplevels(df)
 
@@ -63,7 +65,8 @@ build_xgb_design <- function(
   )
 
   y <- df$y
-  stopifnot(nrow(X) == length(y), ncol(X) > 0)
+  if (nrow(X) != length(y)) stop("Row mismatch between X and y.")
+  if (ncol(X) == 0) stop("Design matrix has 0 columns. Check factor levels / inputs.")
 
   list(
     df = df,
