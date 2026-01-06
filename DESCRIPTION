@@ -24,6 +24,7 @@ Imports:
     tibble,
     xgboost,
     stats,
+    rlang,
     utils
 Suggests:
     testthat (>= 3.0.0),
