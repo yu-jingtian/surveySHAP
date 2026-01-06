@@ -18,7 +18,7 @@ You can install the development version directly from GitHub using **devtools**:
 install.packages("devtools")
 
 # install surveySHAP from GitHub
-devtools::install_github("YOUR_GITHUB_USERNAME/surveySHAP")
+devtools::install_github("yu-jingtian/surveySHAP")
 ```
 
 Then load the package:
