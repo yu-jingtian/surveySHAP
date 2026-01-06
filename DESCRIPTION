@@ -1,0 +1,33 @@
+Package: surveySHAP
+Type: Package
+Title: SHAP-Based Interpretation Tools for Survey Models
+Version: 0.1.0
+Authors@R:
+    person("Jingtian", "Yu",
+           email = "your_email@domain.edu",
+           role = c("aut", "cre"))
+Description:
+    Tools for interpreting machine learning models applied to survey data,
+    with a focus on ordinal and continuous policy preference outcomes.
+    The package provides SHAP-based utilities, visualization helpers,
+    and a curated processed survey dataset for reproducible examples.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Depends:
+    R (>= 4.1.0)
+Imports:
+    dplyr,
+    ggplot2,
+    Matrix,
+    tibble,
+    xgboost,
+    stats,
+    utils
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown
+LazyData: true
+Config/testthat/edition: 3
