@@ -11,15 +11,15 @@ and is designed for reproducible, model-based interpretation of survey responses
 
 ### SHAP values (basic idea)
 
-For each observation $i$ and each feature $j$, the model prediction can be written as  
-$$
+For each observation $`i`$ and each feature $`j`$, the model prediction can be written as  
+```math
 \hat y_i = \phi_0 + \sum_j \phi_{ij},
-$$
-where $\phi_0$ is the baseline prediction (the average model output), and $\phi_{ij}$ is the SHAP value of feature $j$ for observation $i$.
+```
+where $`\phi_0`$ is the baseline prediction (the average model output), and $`\phi_{ij}`$ is the SHAP value of feature $`j`$ for observation $`i`$.
 
--$\phi_{ij} > 0$: feature$j$ pushes the prediction **upward**  
--$\phi_{ij} < 0$: feature$j$ pushes the prediction **downward**  
--$|\phi_{ij}|$: the **strength** of that push  
+-$`\phi_{ij} > 0`$: feature$`j`$ pushes the prediction **upward**  
+-$`\phi_{ij} < 0`$: feature$`j`$ pushes the prediction **downward**  
+-$`|\phi_{ij}|`$: the **strength** of that push  
 
 ---
 
