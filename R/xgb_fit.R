@@ -1,41 +1,35 @@
 #' Fit an XGBoost regression model for survey outcome
 #'
-#' @param X A sparse matrix (dgCMatrix) of features.
+#' @param X A sparse matrix (\code{dgCMatrix}) of features.
 #' @param y Numeric outcome vector.
-#' @param params XGBoost parameter list. If NULL, uses defaults from your script.
+#' @param params XGBoost parameter list. If \code{params$seed} is not provided and
+#'   \code{seed} is not \code{NULL}, the function sets \code{params$seed = seed}.
 #' @param nrounds Number of boosting rounds.
-#' @param seed Random seed.
-#' @param verbose Verbosity passed to xgb.train.
-#' @return A list with `model` (xgb.Booster) and `dall` (xgb.DMatrix).
+#' @param seed Optional integer seed used to set \code{params$seed} for reproducible fitting.
+#' @param verbose Verbosity passed to \code{xgboost::xgb.train()}.
+#' @return A list with \code{model} (\code{xgb.Booster}) and \code{dall} (\code{xgb.DMatrix}).
+#'   For backward/forward compatibility, \code{dtrain} is also returned as an alias of \code{dall}.
 #' @export
-fit_survey_xgb <- function(
-    X,
-    y,
-    params = NULL,
-    nrounds = 300,
-    seed = 123,
-    verbose = 0
-) {
-  if (!inherits(X, "dgCMatrix")) {
-    stop("`X` must be a dgCMatrix (sparse matrix).")
-  }
-  stopifnot(is.numeric(y), length(y) == nrow(X))
+fit_survey_xgb <- function(X,
+                           y,
+                           params = list(
+                             objective = "reg:squarederror",
+                             max_depth = 4,
+                             eta = 0.05,
+                             subsample = 0.8,
+                             colsample_bytree = 0.8
+                           ),
+                           nrounds = 200,
+                           seed = NULL,
+                           verbose = 0) {
 
-  if (is.null(params)) {
-    params <- list(
-      objective = "reg:squarederror",
-      eval_metric = "rmse",
-      max_depth = 4,
-      eta = 0.05,
-      subsample = 0.8,
-      colsample_bytree = 0.8,
-      tree_method = "hist"
-    )
+  if (!is.null(seed)) {
+    if (is.null(params$seed)) params$seed <- as.integer(seed)
   }
+  if (is.null(params$verbosity)) params$verbosity <- as.integer(verbose)
 
   dall <- xgboost::xgb.DMatrix(data = X, label = y)
 
-  set.seed(seed)
   model <- xgboost::xgb.train(
     params = params,
     data = dall,
@@ -43,5 +37,10 @@ fit_survey_xgb <- function(
     verbose = verbose
   )
 
-  list(model = model, dall = dall)
+  # Return BOTH names to avoid breaking any existing code
+  list(
+    model = model,
+    dall  = dall,
+    dtrain = dall
+  )
 }

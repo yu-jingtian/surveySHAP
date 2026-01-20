@@ -4,23 +4,33 @@
 \alias{fit_survey_xgb}
 \title{Fit an XGBoost regression model for survey outcome}
 \usage{
-fit_survey_xgb(X, y, params = NULL, nrounds = 300, seed = 123, verbose = 0)
+fit_survey_xgb(
+  X,
+  y,
+  params = list(objective = "reg:squarederror", max_depth = 4, eta = 0.05, subsample =
+    0.8, colsample_bytree = 0.8),
+  nrounds = 200,
+  seed = NULL,
+  verbose = 0
+)
 }
 \arguments{
-\item{X}{A sparse matrix (dgCMatrix) of features.}
+\item{X}{A sparse matrix (\code{dgCMatrix}) of features.}
 
 \item{y}{Numeric outcome vector.}
 
-\item{params}{XGBoost parameter list. If NULL, uses defaults from your script.}
+\item{params}{XGBoost parameter list. If \code{params$seed} is not provided and
+\code{seed} is not \code{NULL}, the function sets \code{params$seed = seed}.}
 
 \item{nrounds}{Number of boosting rounds.}
 
-\item{seed}{Random seed.}
+\item{seed}{Optional integer seed used to set \code{params$seed} for reproducible fitting.}
 
-\item{verbose}{Verbosity passed to xgb.train.}
+\item{verbose}{Verbosity passed to \code{xgboost::xgb.train()}.}
 }
 \value{
-A list with \code{model} (xgb.Booster) and \code{dall} (xgb.DMatrix).
+A list with \code{model} (\code{xgb.Booster}) and \code{dall} (\code{xgb.DMatrix}).
+For backward/forward compatibility, \code{dtrain} is also returned as an alias of \code{dall}.
 }
 \description{
 Fit an XGBoost regression model for survey outcome

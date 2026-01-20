@@ -4,16 +4,19 @@
 \alias{run_survey_shap}
 \title{Run the full XGBoost + SHAP workflow (main + interaction)}
 \usage{
-run_survey_shap(data, interaction_subsample_n = 5000L)
+run_survey_shap(data, interaction_subsample_n = 5000L, seed = NULL)
 }
 \arguments{
 \item{data}{Input data.frame.}
 
 \item{interaction_subsample_n}{Subsample size for interaction SHAP.}
+
+\item{seed}{Optional integer seed. If provided, controls interaction subsampling and
+makes the overall pipeline more reproducible.}
 }
 \value{
 A list with fitted model and summary tables.
 }
 \description{
-This is a convenience wrapper that replicates the script outputs as data.frames.
+Convenience wrapper that replicates the script outputs as data.frames.
 }
