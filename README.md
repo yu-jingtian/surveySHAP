@@ -7,6 +7,37 @@ ordinal policy preference outcomes.
 The package implements exact **TreeSHAP** using xgboost’s native implementation
 and is designed for reproducible, model-based interpretation of survey responses.
 
+## Introduction
+
+### SHAP values (basic idea)
+
+For each observation \( i \) and each feature \( j \), the model prediction can be written as  
+\[
+\hat y_i = \phi_0 + \sum_j \phi_{ij},
+\]
+where \( \phi_0 \) is the baseline prediction (the average model output), and \( \phi_{ij} \) is the SHAP value of feature \( j \) for observation \( i \).
+
+- \( \phi_{ij} > 0 \): feature \( j \) pushes the prediction **upward**  
+- \( \phi_{ij} < 0 \): feature \( j \) pushes the prediction **downward**  
+- \( |\phi_{ij}| \): the **strength** of that push  
+
+---
+
+### Strength and direction in `surveySHAP`
+
+In this project, we summarize SHAP values across individuals in two ways:
+
+- **One-way (main) effects**: contributions from a single feature (e.g. *partisan*, *gun ownership*).
+- **Two-way (interaction) effects**: joint contributions from a pair of features (e.g. *gun ownership × partisan*).
+
+For both one-way and two-way effects:
+
+- **Strength** measures *how large* the effect is, defined as the average magnitude of SHAP values across individuals.
+- **Direction** measures *which way* the effect tends to push predictions, based on the sign of SHAP values aggregated across individuals.
+
+Intuitively, strength answers *“how important is this factor?”*, while direction answers *“does this factor tend to increase or decrease the outcome?”*.
+
+
 ---
 
 ## Installation
