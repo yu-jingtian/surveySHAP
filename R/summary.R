@@ -113,8 +113,18 @@ summarize_shap_rslt <- function(
 
   feature_i <- group_i
   feature_j <- group_j
-  level_i <- sub(paste0("^", esc(group_i)), "", feat_i, perl = TRUE)
-  level_j <- sub(paste0("^", esc(group_j)), "", feat_j, perl = TRUE)
+  level_i <- mapply(
+    function(f, g) sub(paste0("^", esc(g)), "", f, perl = TRUE),
+    feat_i, group_i,
+    USE.NAMES = FALSE
+  )
+
+  level_j <- mapply(
+    function(f, g) sub(paste0("^", esc(g)), "", f, perl = TRUE),
+    feat_j, group_j,
+    USE.NAMES = FALSE
+  )
+
 
   direction_interaction_complete <- dir_int[, c("direction_active", "n_active"), drop = FALSE]
   direction_interaction_complete$feature_i <- feature_i
