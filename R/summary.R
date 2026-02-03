@@ -1,208 +1,211 @@
-#' Internal: normalize one-way direction table
+#' Summarize SHAP results from run_survey_shap()
 #'
-#' Expected input columns (current pipeline):
-#'   level, shap_active, n, onehot
-#' Output columns:
-#'   feature, level, shap_active, n
-.normalize_direction_main <- function(df) {
-  req <- c("level", "shap_active", "n", "onehot")
-  miss <- setdiff(req, names(df))
-  if (length(miss) > 0) {
-    stop("direction_main is missing required columns: ", paste(miss, collapse = ", "))
-  }
-
-  # feature = onehot with the level suffix removed (robust to edge cases)
-  # default: strip suffix by nchar(level); verify suffix matches to avoid nonsense
-  onehot <- as.character(df$onehot)
-  level  <- as.character(df$level)
-
-  feature <- rep(NA_character_, length(onehot))
-  ok <- !is.na(onehot) & !is.na(level) & endsWith(onehot, level)
-
-  feature[ok] <- substr(onehot[ok], 1, nchar(onehot[ok]) - nchar(level[ok]))
-  # If not ok, try a safer heuristic: split at first punctuation/space boundary
-  # but keep NA if ambiguous (better than silently wrong)
-  # (you can remove this fallback if you prefer strict parsing)
-  bad <- which(!ok)
-  if (length(bad) > 0) {
-    # attempt: feature is up to first capital letter after underscore groups, etc.
-    # in your data, most onehot are like "partisanDem." or "gun_ownNot sure"
-    # We'll treat the feature as up to the first character of 'level' occurrence.
-    for (i in bad) {
-      pos <- regexpr(level[i], onehot[i], fixed = TRUE)[1]
-      if (!is.na(pos) && pos > 1) feature[i] <- substr(onehot[i], 1, pos - 1)
-    }
-  }
-
-  out <- df
-  out$feature <- feature
-
-  out <- out[, c("feature", "level", "shap_active", "n"), drop = FALSE]
-  out
-}
-
-#' Internal: normalize two-way direction table
+#' Produces compact summaries for the main outputs of `run_survey_shap()`:
+#' group-level strength (one-way and two-way) and directional effects
+#' (top/bottom levels and pairs).
 #'
-#' Expected input columns (current pipeline):
-#'   feat_i, feat_j, group_i, group_j, direction_active, n_active
-#' Output columns:
-#'   feature_i, level_i, feature_j, level_j, direction_active, n_active
-.normalize_direction_int <- function(df) {
-  req <- c("feat_i", "feat_j", "group_i", "group_j", "direction_active", "n_active")
-  miss <- setdiff(req, names(df))
-  if (length(miss) > 0) {
-    stop("direction_int is missing required columns: ", paste(miss, collapse = ", "))
+#' Direction tables are sorted by signed SHAP values and truncated to
+#' top/bottom `top_n`. Two-way direction results are filtered by
+#' `min_n_interaction` to avoid unstable estimates from rare co-occurrences.
+#'
+#' @param shap_rslt A list returned by `run_survey_shap()`.
+#' @param top_n Number of top and bottom rows to return for direction tables.
+#' @param min_n_main Minimum per-level sample size (`n`) for one-way direction results.
+#' @param min_n_interaction Minimum `n_active` for two-way direction results.
+#' @param quiet If TRUE, do not print; only return the summary object.
+#'
+#' @return An object of class `surveySHAP_summary` (a named list) containing:
+#' \describe{
+#'   \item{strength_main_group}{Group-level one-way strength table.}
+#'   \item{strength_interaction_group}{Group-level two-way strength table.}
+#'   \item{direction_main_complete}{Complete one-way direction table (no filtering), with feature/level columns.}
+#'   \item{direction_interaction_complete}{Complete two-way direction table (no filtering), with feature/level columns.}
+#'   \item{direction_main_top}{Top `top_n` one-way directional rows (after filtering).}
+#'   \item{direction_main_bottom}{Bottom `top_n` one-way directional rows (after filtering).}
+#'   \item{direction_interaction_top}{Top `top_n` interaction directional rows (after filtering).}
+#'   \item{direction_interaction_bottom}{Bottom `top_n` interaction directional rows (after filtering).}
+#'   \item{filters}{A list describing how many rows were removed by sample-size filters.}
+#' }
+#' @export
+summarize_shap_rslt <- function(
+    shap_rslt,
+    top_n = 5L,
+    min_n_main = 50L,
+    min_n_interaction = 100L,
+    quiet = FALSE
+) {
+  # ---- validation ----
+  if (!is.list(shap_rslt)) {
+    stop("`shap_rslt` must be the list returned by `run_survey_shap()`.")
   }
 
-  feat_i  <- as.character(df$feat_i)
-  feat_j  <- as.character(df$feat_j)
-  group_i <- as.character(df$group_i)
-  group_j <- as.character(df$group_j)
+  req <- c(
+    "strength_main_group",
+    "direction_main_active",
+    "strength_interaction_group",
+    "direction_interaction_active"
+  )
+  miss <- setdiff(req, names(shap_rslt))
+  if (length(miss) > 0) {
+    stop("`shap_rslt` is missing: ", paste(miss, collapse = ", "))
+  }
 
-  # feature_i/j are exactly group_i/j
+  top_n <- as.integer(top_n)
+  min_n_main <- as.integer(min_n_main)
+  min_n_interaction <- as.integer(min_n_interaction)
+
+  # ---- strength tables (already sorted upstream) ----
+  strength_main <- shap_rslt$strength_main_group
+  strength_int  <- shap_rslt$strength_interaction_group
+
+  # ---- one-way direction (COMPLETE; no filtering) ----
+  dir_main <- shap_rslt$direction_main_active
+
+  req_main <- c("level", "shap_active", "n", "onehot")
+  miss_main <- setdiff(req_main, names(dir_main))
+  if (length(miss_main) > 0) {
+    stop("`direction_main_active` is missing columns: ", paste(miss_main, collapse = ", "))
+  }
+
+  # feature = onehot with the trailing `level` removed (since onehot is paste0(feature, level))
+  onehot_chr <- as.character(dir_main$onehot)
+  level_chr  <- as.character(dir_main$level)
+
+  feature_chr <- rep(NA_character_, length(onehot_chr))
+  ok <- !is.na(onehot_chr) & !is.na(level_chr) & endsWith(onehot_chr, level_chr)
+  feature_chr[ok] <- substr(onehot_chr[ok], 1, nchar(onehot_chr[ok]) - nchar(level_chr[ok]))
+
+  direction_main_complete <- dir_main[, c("level", "shap_active", "n"), drop = FALSE]
+  direction_main_complete$feature <- feature_chr
+  direction_main_complete <- direction_main_complete[, c("feature", "level", "shap_active", "n"), drop = FALSE]
+
+  before_main <- nrow(direction_main_complete)
+
+  # ---- one-way filtering (printing views only) ----
+  dir_main_f <- direction_main_complete[direction_main_complete$n >= min_n_main, , drop = FALSE]
+  after_main <- nrow(dir_main_f)
+
+  direction_main_top <- utils::head(
+    dir_main_f[order(-dir_main_f$shap_active), , drop = FALSE],
+    top_n
+  )
+  direction_main_bottom <- utils::head(
+    dir_main_f[order(dir_main_f$shap_active), , drop = FALSE],
+    top_n
+  )
+
+  # ---- two-way direction (COMPLETE; no filtering) ----
+  dir_int <- shap_rslt$direction_interaction_active
+
+  req_int <- c("feat_i", "feat_j", "group_i", "group_j", "direction_active", "n_active")
+  miss_int <- setdiff(req_int, names(dir_int))
+  if (length(miss_int) > 0) {
+    stop("`direction_interaction_active` is missing columns: ", paste(miss_int, collapse = ", "))
+  }
+
+  feat_i  <- as.character(dir_int$feat_i)
+  feat_j  <- as.character(dir_int$feat_j)
+  group_i <- as.character(dir_int$group_i)
+  group_j <- as.character(dir_int$group_j)
+
+  # escape regex metacharacters in group names
+  esc <- function(x) gsub("([\\.^$|()\\[\\]{}*+?\\\\-])", "\\\\\\1", x, perl = TRUE)
+
   feature_i <- group_i
   feature_j <- group_j
+  level_i <- sub(paste0("^", esc(group_i)), "", feat_i, perl = TRUE)
+  level_j <- sub(paste0("^", esc(group_j)), "", feat_j, perl = TRUE)
 
-  # level_i/j = feat_i/j with group prefix stripped
-  # using ^prefix match to be safe
-  level_i <- sub(paste0("^", gsub("([\\W])", "\\\\\\1", group_i)), "", feat_i)
-  level_j <- sub(paste0("^", gsub("([\\W])", "\\\\\\1", group_j)), "", feat_j)
+  direction_interaction_complete <- dir_int[, c("direction_active", "n_active"), drop = FALSE]
+  direction_interaction_complete$feature_i <- feature_i
+  direction_interaction_complete$level_i   <- level_i
+  direction_interaction_complete$feature_j <- feature_j
+  direction_interaction_complete$level_j   <- level_j
 
-  out <- df
-  out$feature_i <- feature_i
-  out$level_i   <- level_i
-  out$feature_j <- feature_j
-  out$level_j   <- level_j
+  direction_interaction_complete <- direction_interaction_complete[
+    , c("feature_i", "level_i", "feature_j", "level_j", "direction_active", "n_active"),
+    drop = FALSE
+  ]
 
-  out <- out[, c("feature_i", "level_i", "feature_j", "level_j", "direction_active", "n_active"), drop = FALSE]
-  out
-}
+  before_int <- nrow(direction_interaction_complete)
 
-#' Summary method for surveySHAP objects
-#'
-#' This method assumes your existing code already computes:
-#'   strength_main, strength_int, direction_main, direction_int
-#' as data.frames.
-#'
-#' You only need to ensure those objects exist in this function.
-summary.surveySHAP <- function(object,
-                               top_n = 5,
-                               min_n_main = 100,
-                               min_n_interaction = 100,
-                               ...) {
-  # ---- YOUR EXISTING COMPUTATION BLOCK GOES HERE ----
-  # The following four must be produced by your current pipeline:
-  #
-  # strength_main: data.frame with columns group, strength
-  # strength_int : data.frame with columns pair, strength
-  # direction_main (UNFILTERED): columns level, shap_active, n, onehot
-  # direction_int  (UNFILTERED): columns feat_i, feat_j, group_i, group_j,
-  #                              direction_active, n_active
-  #
-  # For example, if your old code already created them, keep it unchanged.
-  #
-  # strength_main <- ...
-  # strength_int  <- ...
-  # direction_main <- ...
-  # direction_int  <- ...
+  # ---- two-way filtering (printing views only) ----
+  dir_int_f <- direction_interaction_complete[direction_interaction_complete$n_active >= min_n_interaction, , drop = FALSE]
+  after_int <- nrow(dir_int_f)
 
-  if (!exists("strength_main", inherits = FALSE) ||
-      !exists("strength_int",  inherits = FALSE) ||
-      !exists("direction_main", inherits = FALSE) ||
-      !exists("direction_int",  inherits = FALSE)) {
-    stop("summary.surveySHAP(): expected strength_main, strength_int, direction_main, direction_int to be created by the existing pipeline.")
-  }
-
-  # ---- NEW: normalize COMPLETE direction tables (NO FILTERING) ----
-  direction_main_complete <- .normalize_direction_main(direction_main)
-  direction_int_complete  <- .normalize_direction_int(direction_int)
-
-  # ---- Filtering ONLY for printing views ----
-  kept_main <- direction_main_complete[!is.na(direction_main_complete$n) & direction_main_complete$n >= min_n_main, , drop = FALSE]
-  kept_int  <- direction_int_complete[!is.na(direction_int_complete$n_active) & direction_int_complete$n_active >= min_n_interaction, , drop = FALSE]
-
-  # TOP/BOTTOM for printing
-  top_main_pos <- kept_main[order(kept_main$shap_active, decreasing = TRUE), , drop = FALSE]
-  top_main_pos <- head(top_main_pos[top_main_pos$shap_active > 0, , drop = FALSE], top_n)
-
-  top_main_neg <- kept_main[order(kept_main$shap_active, decreasing = FALSE), , drop = FALSE]
-  top_main_neg <- head(top_main_neg[top_main_neg$shap_active < 0, , drop = FALSE], top_n)
-
-  top_int_pos <- kept_int[order(kept_int$direction_active, decreasing = TRUE), , drop = FALSE]
-  top_int_pos <- head(top_int_pos[top_int_pos$direction_active > 0, , drop = FALSE], top_n)
-
-  top_int_neg <- kept_int[order(kept_int$direction_active, decreasing = FALSE), , drop = FALSE]
-  top_int_neg <- head(top_int_neg[top_int_neg$direction_active < 0, , drop = FALSE], top_n)
-
-  # counts for the "Filters" section should refer to UNFILTERED totals
-  filters <- list(
-    min_n_main = min_n_main,
-    min_n_interaction = min_n_interaction,
-    kept_main = nrow(kept_main),
-    total_main = nrow(direction_main_complete),
-    kept_int = nrow(kept_int),
-    total_int = nrow(direction_int_complete)
+  direction_int_top <- utils::head(
+    dir_int_f[order(-dir_int_f$direction_active), , drop = FALSE],
+    top_n
+  )
+  direction_int_bottom <- utils::head(
+    dir_int_f[order(dir_int_f$direction_active), , drop = FALSE],
+    top_n
   )
 
   out <- list(
-    strength_main = strength_main,
-    strength_int  = strength_int,
+    strength_main_group = strength_main,
+    strength_interaction_group = strength_int,
 
-    # COMPLETE (unfiltered) direction tables you can export to CSV
-    direction_main = direction_main_complete,
-    direction_int  = direction_int_complete,
+    # COMPLETE (no filtering) — for CSV export
+    direction_main_complete = direction_main_complete,
+    direction_interaction_complete = direction_interaction_complete,
 
-    # printing views (filtered + truncated)
-    direction_main_top_pos = top_main_pos,
-    direction_main_top_neg = top_main_neg,
-    direction_int_top_pos  = top_int_pos,
-    direction_int_top_neg  = top_int_neg,
+    # filtered + truncated — for printing
+    direction_main_top = direction_main_top,
+    direction_main_bottom = direction_main_bottom,
+    direction_interaction_top = direction_int_top,
+    direction_interaction_bottom = direction_int_bottom,
 
-    filters = filters,
-    top_n = top_n
+    filters = list(
+      one_way = list(
+        min_n_main = min_n_main,
+        before = before_main,
+        after = after_main,
+        removed = before_main - after_main
+      ),
+      two_way = list(
+        min_n_interaction = min_n_interaction,
+        before = before_int,
+        after = after_int,
+        removed = before_int - after_int
+      )
+    )
   )
-
   class(out) <- "surveySHAP_summary"
+
+  if (!quiet) print(out)
   out
 }
 
-#' Print method for surveySHAP_summary
+#' @export
 print.surveySHAP_summary <- function(x, ...) {
-  cat("=== surveySHAP summary ===\n\n")
+  cat("\n=== surveySHAP summary ===\n\n")
 
   cat("One-way strength (group):\n")
-  print(x$strength_main)
+  print(x$strength_main_group)
   cat("\n")
 
   cat("Two-way strength (group pairs):\n")
-  print(x$strength_int)
+  print(x$strength_interaction_group)
   cat("\n")
 
   cat("Filters:\n")
-  cat(
-    sprintf("  One-way direction: kept %d/%d (min_n_main = %d)\n",
-            x$filters$kept_main, x$filters$total_main, x$filters$min_n_main)
-  )
-  cat(
-    sprintf("  Two-way direction: kept %d/%d (min_n_interaction = %d)\n\n",
-            x$filters$kept_int, x$filters$total_int, x$filters$min_n_interaction)
-  )
+  cat("  One-way direction: kept ",
+      x$filters$one_way$after, "/", x$filters$one_way$before,
+      " (min_n_main = ", x$filters$one_way$min_n_main, ")\n", sep = "")
+  cat("  Two-way direction: kept ",
+      x$filters$two_way$after, "/", x$filters$two_way$before,
+      " (min_n_interaction = ", x$filters$two_way$min_n_interaction, ")\n\n", sep = "")
 
   cat("One-way direction: TOP (positive)\n")
-  print(x$direction_main_top_pos)
-  cat("\n")
+  print(x$direction_main_top)
+  cat("\nOne-way direction: BOTTOM (negative)\n")
+  print(x$direction_main_bottom)
 
-  cat("One-way direction: BOTTOM (negative)\n")
-  print(x$direction_main_top_neg)
-  cat("\n\n")
-
-  cat("Two-way direction (active-active): TOP (positive)\n")
-  print(x$direction_int_top_pos)
-  cat("\n\n")
-
-  cat("Two-way direction (active-active): BOTTOM (negative)\n")
-  print(x$direction_int_top_neg)
-  cat("\n")
+  cat("\n\nTwo-way direction (active-active): TOP (positive)\n")
+  print(x$direction_interaction_top)
+  cat("\nTwo-way direction (active-active): BOTTOM (negative)\n")
+  print(x$direction_interaction_bottom)
 
   invisible(x)
 }
