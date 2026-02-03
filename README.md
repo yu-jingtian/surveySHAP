@@ -189,49 +189,49 @@ summarize_shap_rslt(
 
 ### One-way SHAP direction (TOP 5)
 
-| level              | shap_active | n     | onehot                    |
-|--------------------|-------------|-------|---------------------------|
-| Dem.               | 0.14985639  | 18956 | partisanDem.              |
-| No guns in HH      | 0.05013081  | 26412 | gun_ownNo guns in HH      |
-| Other              | 0.04683239  | 199   | genderOther               |
-| HH owns (not self) | 0.03358670  | 5137  | gun_ownHH owns (not self) |
-| Asian              | 0.01674442  | 1296  | raceAsian                 |
+| feature  | level               | shap_active | n     |
+|----------|---------------------|-------------|-------|
+| partisan | Dem.                | 0.13755627  | 18956 |
+| gun_own  | No guns in HH        | 0.05423058  | 26412 |
+| gender   | Other               | 0.04566492  | 199   |
+| gun_own  | HH owns (not self)  | 0.03959752  | 5137  |
+| race     | Asian               | 0.01701959  | 1296  |
 
 ---
 
 ### One-way SHAP direction (BOTTOM 5)
 
-| level     | shap_active  | n     | onehot           |
-|-----------|--------------|-------|------------------|
-| Not sure  | -0.090879910 | 2112  | gun_ownNot sure  |
-| Rep.      | -0.069700253 | 12665 | partisanRep.     |
-| Own a gun | -0.026172638 | 10737 | gun_ownOwn a gun |
-| Men       | -0.023176405 | 19425 | genderMen        |
-| Hipanic   | -0.005866928 | 3275  | raceHipanic      |
+| feature  | level      | shap_active  | n     |
+|----------|------------|--------------|-------|
+| partisan | Rep.       | -0.089594014 | 12665 |
+| gun_own  | Not sure   | -0.082315312 | 2112  |
+| gender   | Men        | -0.023295154 | 19425 |
+| gun_own  | Own a gun  | -0.020335748 | 10737 |
+| race     | Hipanic    | -0.005021199 | 3275  |
 
 ---
 
 ### Two-way SHAP direction (active–active, TOP 5)
 
-| feat_i                    | feat_j       | group_i | group_j | direction_active | n_active |
-|---------------------------|--------------|---------|---------|------------------|----------|
-| gun_ownNot sure           | partisanRep. | gun_own | partisan| 0.005862512      | 103      |
-| gun_ownNo guns in HH      | partisanInd. | gun_own | partisan| 0.005718919      | 808      |
-| partisanInd.              | raceBlack    | partisan| race    | 0.005082146      | 113      |
-| partisanDem.              | raceWhite    | partisan| race    | 0.004441996      | 1469     |
-| gun_ownHH owns (not self) | partisanInd. | gun_own | partisan| 0.004430534      | 145      |
+| feature_i | level_i            | feature_j | level_j | direction_active | n_active |
+|-----------|--------------------|-----------|---------|------------------|----------|
+| gun_own   | Not sure           | partisan  | Rep.    | 0.008531859      | 103      |
+| gun_own   | No guns in HH      | partisan  | Ind.    | 0.006711430      | 808      |
+| gun_own   | HH owns (not self) | partisan  | Ind.    | 0.005844191      | 145      |
+| partisan  | Ind.               | race      | Black   | 0.005452007      | 113      |
+| partisan  | Dem.               | race      | White   | 0.004115614      | 1469     |
 
 ---
 
 ### Two-way SHAP direction (active–active, BOTTOM 5)
 
-| feat_i                    | feat_j         | group_i | group_j | direction_active | n_active |
-|---------------------------|----------------|---------|---------|------------------|----------|
-| partisanDem.              | raceBlack      | partisan| race    | -0.012890889     | 434      |
-| gun_ownNo guns in HH      | partisanDem.   | gun_own | partisan| -0.008899130     | 1555     |
-| gun_ownHH owns (not self) | partisanDem.   | gun_own | partisan| -0.006641536     | 243      |
-| gun_ownNo guns in HH      | raceBlack      | gun_own | race    | -0.005707449     | 402      |
-| partisanRep.              | collegeCollege | partisan| college | -0.004965699     | 590      |
+| feature_i | level_i            | feature_j | level_j | direction_active | n_active |
+|-----------|--------------------|-----------|---------|------------------|----------|
+| partisan  | Dem.               | race      | Black   | -0.013514628     | 434      |
+| gun_own   | No guns in HH      | partisan  | Dem.    | -0.009700744     | 1555     |
+| gun_own   | HH owns (not self) | partisan  | Dem.    | -0.006499079     | 243      |
+| gun_own   | No guns in HH      | race      | Black   | -0.006345862     | 402      |
+| gun_own   | HH owns (not self) | gender    | Men     | -0.005851881     | 118      |
 
 ---
 
