@@ -1,464 +1,405 @@
 ############################################################
-# Bootstrap utilities
+# Bootstrap utilities (targeted)
+# - boot_strength(): bootstrap ONE strength target (main or interaction)
+# - boot_direction(): bootstrap ONE direction target (main or interaction level-pair)
+#
+# Drop this whole file into R/ (e.g., R/bootstrap.R)
 ############################################################
 
-# --- internal helpers (not exported) ---
+# ============================================================
+# Targeted bootstrap wrappers (thread-aware)
+# Depends on existing package functions:
+#   build_xgb_design(), fit_survey_xgb(), compute_shap_main(), compute_shap_interaction(),
+#   shap_strength_main_group(), shap_strength_interaction_group(), active_shap_by_group()
+# ============================================================
 
-.as_named_strength_main <- function(df) {
-  stopifnot(is.data.frame(df), all(c("group", "strength") %in% names(df)))
-  v <- df$strength
-  names(v) <- df$group
-  v
-}
+# ---- internal helpers --------------------------------------
 
-.as_named_strength_pair <- function(df) {
-  stopifnot(is.data.frame(df), all(c("pair", "strength") %in% names(df)))
-  v <- df$strength
-  names(v) <- df$pair
-  v
-}
-
-# direction_main_active in your repo: columns (level, shap_active, n, onehot)
-# Use onehot as the stable key.
-.as_named_direction_main <- function(df) {
-  stopifnot(is.data.frame(df), all(c("level", "shap_active", "n", "onehot") %in% names(df)))
-  key <- as.character(df$onehot)
-  v <- df$shap_active; names(v) <- key
-  n <- df$n;          names(n) <- key
-  list(v = v, n = n)
-}
-
-# direction_interaction_active in your repo already has feat_i/feat_j columns.
-.as_named_direction_interaction <- function(df) {
-  stopifnot(is.data.frame(df),
-            all(c("feat_i", "feat_j", "group_i", "group_j", "direction_active", "n_active") %in% names(df)))
-  key <- paste(df$feat_i, df$feat_j, sep = "×")
-  v <- df$direction_active; names(v) <- key
-  n <- df$n_active;         names(n) <- key
-  list(v = v, n = n)
-}
-
-.align_named_numeric <- function(x, ref_names) {
-  out <- rep(NA_real_, length(ref_names))
-  names(out) <- ref_names
-  if (!is.null(x) && length(x) > 0) {
-    keep <- intersect(names(x), ref_names)
-    out[keep] <- x[keep]
+.canon_pair <- function(feature, level = NULL) {
+  stopifnot(is.character(feature), length(feature) %in% c(1L, 2L))
+  if (length(feature) == 1L) {
+    if (!is.null(level)) stopifnot(length(level) == 1L)
+    return(list(feature = feature, level = level))
   }
-  out
+  if (!is.null(level)) stopifnot(length(level) == 2L)
+  ord <- order(feature)
+  list(feature = feature[ord], level = if (is.null(level)) NULL else level[ord])
 }
 
+.make_pair_label <- function(f1, f2) {
+  if (f1 <= f2) paste0(f1, " × ", f2) else paste0(f2, " × ", f1)
+}
 
-#' Bootstrap run for surveySHAP summaries (strength + direction)
-#'
-#' Parallel-safe even when the package is NOT installed on workers (devtools::load_all / sourced).
-#'
-#' @export
-bootstrap_survey_shap <- function(data,
-                                  B = 200,
-                                  seed = 1,
-                                  parallel = FALSE,
-                                  n_cores = max(1L, parallel::detectCores() - 1L),
-                                  run_args = list(),
-                                  verbose = TRUE) {
-  stopifnot(is.data.frame(data), B >= 1)
+.summarise_boot_scalar <- function(estimate, boot, conf = 0.95) {
+  boot <- as.numeric(boot)
+  ok <- !is.na(boot)
+  present_prob <- mean(ok)
 
-  # Forward only arguments supported by run_survey_shap()
-  allowed <- names(formals(run_survey_shap))
-  run_args <- run_args[names(run_args) %in% allowed]
+  if (sum(ok) == 0L) {
+    return(data.frame(
+      estimate = estimate,
+      mean_boot = NA_real_,
+      sd_boot = NA_real_,
+      ci_lo = NA_real_,
+      ci_hi = NA_real_,
+      present_prob = present_prob,
+      stringsAsFactors = FALSE
+    ))
+  }
 
-  # Baseline run defines reference keys
-  args0 <- run_args
-  args0$seed <- as.integer(seed)
-  base <- try(do.call(run_survey_shap, c(list(data = data), args0)), silent = TRUE)
-  if (inherits(base, "try-error")) stop("Baseline run_survey_shap() failed:\n", base)
+  alpha <- (1 - conf) / 2
+  qs <- stats::quantile(boot[ok], probs = c(alpha, 1 - alpha), names = FALSE, type = 7)
 
-  base_strength_main <- .as_named_strength_main(base$strength_main_group)
-  base_strength_pair <- .as_named_strength_pair(base$strength_interaction_group)
-  base_dir_main <- .as_named_direction_main(base$direction_main_active)
-  base_dir_int  <- .as_named_direction_interaction(base$direction_interaction_active)
+  data.frame(
+    estimate = estimate,
+    mean_boot = mean(boot[ok]),
+    sd_boot = stats::sd(boot[ok]),
+    ci_lo = qs[1],
+    ci_hi = qs[2],
+    present_prob = present_prob,
+    stringsAsFactors = FALSE
+  )
+}
 
-  ref_strength_main_names <- names(base_strength_main)
-  ref_strength_pair_names <- names(base_strength_pair)
-  ref_dir_main_keys <- names(base_dir_main$v)
-  ref_dir_int_keys  <- names(base_dir_int$v)
+.bootstrap_scalar <- function(data, B, seed, parallel, n_cores, FUN_one) {
+  # allow tibble; allow matrix (coerce)
+  if (is.matrix(data)) data <- as.data.frame(data)
+  if (!inherits(data, "data.frame")) {
+    stop("`data` must be a data.frame/tibble (or a matrix coercible to data.frame). ",
+         "Got class: ", paste(class(data), collapse = ", "))
+  }
 
-  strength_main_mat <- matrix(NA_real_, nrow = B, ncol = length(ref_strength_main_names),
-                              dimnames = list(NULL, ref_strength_main_names))
-  strength_pair_mat <- matrix(NA_real_, nrow = B, ncol = length(ref_strength_pair_names),
-                              dimnames = list(NULL, ref_strength_pair_names))
+  B <- as.integer(B)
+  if (B < 1L) stop("B must be >= 1")
+  if (!is.null(seed)) seed <- as.integer(seed)
 
-  dir_main_mat <- matrix(NA_real_, nrow = B, ncol = length(ref_dir_main_keys),
-                         dimnames = list(NULL, ref_dir_main_keys))
-  dir_int_mat  <- matrix(NA_real_, nrow = B, ncol = length(ref_dir_int_keys),
-                         dimnames = list(NULL, ref_dir_int_keys))
+  # deterministic per-rep seeds
+  seeds <- if (is.null(seed)) {
+    sample.int(.Machine$integer.max, B)
+  } else {
+    seed + seq_len(B)
+  }
 
-  dir_main_n_mat <- matrix(NA_real_, nrow = B, ncol = length(ref_dir_main_keys),
-                           dimnames = list(NULL, ref_dir_main_keys))
-  dir_int_n_mat  <- matrix(NA_real_, nrow = B, ncol = length(ref_dir_int_keys),
-                           dimnames = list(NULL, ref_dir_int_keys))
-
-  failures <- integer(0)
   n <- nrow(data)
 
   one_rep <- function(b) {
-    idx <- sample.int(n, size = n, replace = TRUE)
-    db <- data[idx, , drop = FALSE]
-
-    args_b <- run_args
-    args_b$seed <- as.integer(seed + b)
-
-    rslt <- do.call(run_survey_shap, c(list(data = db), args_b))
-
-    sm <- .as_named_strength_main(rslt$strength_main_group)
-    sp <- .as_named_strength_pair(rslt$strength_interaction_group)
-    dm <- .as_named_direction_main(rslt$direction_main_active)
-    di <- .as_named_direction_interaction(rslt$direction_interaction_active)
-
-    list(
-      strength_main = .align_named_numeric(sm, ref_strength_main_names),
-      strength_pair = .align_named_numeric(sp, ref_strength_pair_names),
-      dir_main_v = .align_named_numeric(dm$v, ref_dir_main_keys),
-      dir_main_n = .align_named_numeric(dm$n, ref_dir_main_keys),
-      dir_int_v  = .align_named_numeric(di$v, ref_dir_int_keys),
-      dir_int_n  = .align_named_numeric(di$n, ref_dir_int_keys)
-    )
+    s <- seeds[b]
+    set.seed(s)
+    idx <- sample.int(n, n, replace = TRUE)
+    dat_b <- data[idx, , drop = FALSE]
+    tryCatch(FUN_one(dat_b, seed = s), error = function(e) NA_real_)
   }
 
-  if (!parallel) {
-    for (b in seq_len(B)) {
-      if (verbose && (b %% max(1L, floor(B / 10))) == 0L) {
-        message(sprintf("Bootstrap %d / %d", b, B))
-      }
-      out <- try(one_rep(b), silent = TRUE)
-      if (inherits(out, "try-error")) {
-        failures <- c(failures, b)
-        next
-      }
-      strength_main_mat[b, ] <- out$strength_main
-      strength_pair_mat[b, ] <- out$strength_pair
-      dir_main_mat[b, ]      <- out$dir_main_v
-      dir_main_n_mat[b, ]    <- out$dir_main_n
-      dir_int_mat[b, ]       <- out$dir_int_v
-      dir_int_n_mat[b, ]     <- out$dir_int_n
-    }
-  } else {
+  if (isTRUE(parallel)) {
+    if (is.null(n_cores)) n_cores <- max(1L, parallel::detectCores() - 1L)
+    n_cores <- as.integer(n_cores)
 
-    # ---------- Robust export machinery ----------
-    resolve_symbol <- function(sym) {
-      # 1) Global / calling environments
-      if (exists(sym, envir = .GlobalEnv, inherits = TRUE)) {
-        return(get(sym, envir = .GlobalEnv, inherits = TRUE))
-      }
-      if (exists(sym, envir = parent.frame(), inherits = TRUE)) {
-        return(get(sym, envir = parent.frame(), inherits = TRUE))
-      }
-
-      # 2) Where run_survey_shap() is defined
-      env_rs <- environment(run_survey_shap)
-      if (!is.null(env_rs) && exists(sym, envir = env_rs, inherits = TRUE)) {
-        return(get(sym, envir = env_rs, inherits = TRUE))
-      }
-
-      # 3) Package namespace if available (works when package is installed/loaded)
-      ns_name <- tryCatch(getNamespaceName(env_rs), error = function(e) NULL)
-      if (!is.null(ns_name) && isNamespaceLoaded(ns_name)) {
-        ns <- asNamespace(ns_name)
-        if (exists(sym, envir = ns, inherits = TRUE)) {
-          return(get(sym, envir = ns, inherits = TRUE))
-        }
-      }
-
-      stop(sprintf("Cannot resolve symbol '%s' for parallel export.", sym))
-    }
-
-    # Build an explicit export env containing everything workers need
-    export_env <- new.env(parent = emptyenv())
-
-    # Core objects workers need
-    base_symbols <- c(
-      "data", "n", "seed", "run_args",
-      "ref_strength_main_names", "ref_strength_pair_names",
-      "ref_dir_main_keys", "ref_dir_int_keys",
-      "run_survey_shap",
-      ".as_named_strength_main", ".as_named_strength_pair",
-      ".as_named_direction_main", ".as_named_direction_interaction",
-      ".align_named_numeric"
-    )
-
-    # Likely pipeline dependencies (your errors confirm these exist)
-    pipe_symbols <- c(
-      "build_xgb_design", "fit_survey_xgb",
-      "compute_shap_main", "compute_shap_interaction",
-      "shap_strength_main_group", "shap_direction_main_active",
-      "shap_strength_interaction_group", "shap_direction_interaction_active",
-      "full_dummy_contrasts"
-    )
-
-    # Add any other helpers your build/design functions might call
-    # (safe even if not used; resolve_symbol will error if truly missing)
-    # You can append more here if another "could not find function" appears.
-    all_symbols <- unique(c(base_symbols, pipe_symbols))
-
-    for (sym in all_symbols) {
-      assign(sym, resolve_symbol(sym), envir = export_env)
-    }
-
-    n_cores <- max(1L, as.integer(n_cores))
     cl <- parallel::makeCluster(n_cores)
     on.exit(parallel::stopCluster(cl), add = TRUE)
 
     parallel::clusterEvalQ(cl, {
-      library(xgboost)
-      library(Matrix)
+      suppressPackageStartupMessages({
+        library(xgboost)
+        library(Matrix)
+      })
       NULL
     })
 
-    parallel::clusterExport(cl, varlist = all_symbols, envir = export_env)
+    # Export needed symbols from current environment/namespace
+    to_export <- unique(c(
+      ".canon_pair", ".make_pair_label", ".summarise_boot_scalar", ".bootstrap_scalar",
+      "build_xgb_design", "fit_survey_xgb",
+      "compute_shap_main", "compute_shap_interaction",
+      "shap_strength_main_group", "shap_strength_interaction_group",
+      "active_shap_by_group"
+    ))
+    parallel::clusterExport(cl, varlist = to_export, envir = environment())
 
-    res <- parallel::parLapply(cl, X = seq_len(B), fun = function(b) {
-      set.seed(as.integer(seed + b))
-      idx <- sample.int(n, size = n, replace = TRUE)
-      db <- data[idx, , drop = FALSE]
+    boot <- unlist(parallel::parLapply(cl, seq_len(B), one_rep), use.names = FALSE)
+  } else {
+    boot <- vapply(seq_len(B), one_rep, numeric(1))
+  }
 
-      args_b <- run_args
-      args_b$seed <- as.integer(seed + b)
+  list(boot = as.numeric(boot), seeds = seeds)
+}
 
-      rslt <- do.call(run_survey_shap, c(list(data = db), args_b))
+# ---- core scalar targets -----------------------------------
 
-      sm <- .as_named_strength_main(rslt$strength_main_group)
-      sp <- .as_named_strength_pair(rslt$strength_interaction_group)
-      dm <- .as_named_direction_main(rslt$direction_main_active)
-      di <- .as_named_direction_interaction(rslt$direction_interaction_active)
+.compute_strength_target <- function(data, feature, interaction_subsample_n, seed, xgb_nthread) {
+  feature <- .canon_pair(feature)$feature
 
-      list(
-        ok = TRUE,
-        strength_main = .align_named_numeric(sm, ref_strength_main_names),
-        strength_pair = .align_named_numeric(sp, ref_strength_pair_names),
-        dir_main_v = .align_named_numeric(dm$v, ref_dir_main_keys),
-        dir_main_n = .align_named_numeric(dm$n, ref_dir_main_keys),
-        dir_int_v  = .align_named_numeric(di$v, ref_dir_int_keys),
-        dir_int_n  = .align_named_numeric(di$n, ref_dir_int_keys)
-      )
-    })
+  design <- build_xgb_design(data)
 
-    for (b in seq_len(B)) {
-      out <- res[[b]]
-      if (is.null(out$ok) || !isTRUE(out$ok)) {
-        failures <- c(failures, b)
-        next
-      }
-      strength_main_mat[b, ] <- out$strength_main
-      strength_pair_mat[b, ] <- out$strength_pair
-      dir_main_mat[b, ]      <- out$dir_main_v
-      dir_main_n_mat[b, ]    <- out$dir_main_n
-      dir_int_mat[b, ]       <- out$dir_int_v
-      dir_int_n_mat[b, ]     <- out$dir_int_n
-    }
+  fit <- fit_survey_xgb(
+    X = design$X,
+    y = design$y,
+    seed = seed,
+    nthread = xgb_nthread
+  )
+
+  if (length(feature) == 1L) {
+    main <- compute_shap_main(fit$model, fit$dall, feature_names = design$feature_names)
+    df_strength <- shap_strength_main_group(main$shap_feat, design$feature_names)
+    val <- df_strength$strength[df_strength$group == feature]
+    if (length(val) != 1L) stop("Group not found in strength_main: ", feature)
+    return(as.numeric(val))
+  }
+
+  inter <- compute_shap_interaction(
+    fit$model,
+    design$X,
+    subsample_n = interaction_subsample_n,
+    seed = seed
+  )
+
+  df_int <- shap_strength_interaction_group(inter$shap_int_feat, design$feature_names)
+  pair_label <- .make_pair_label(feature[1], feature[2])
+  val <- df_int$strength[df_int$pair == pair_label]
+  if (length(val) != 1L) stop("Pair not found in strength_interaction: ", pair_label)
+  as.numeric(val)
+}
+
+.compute_direction_target <- function(data, feature, level, interaction_subsample_n, seed, xgb_nthread) {
+  canon <- .canon_pair(feature, level)
+  feature <- canon$feature
+  level <- canon$level
+
+  design <- build_xgb_design(data)
+
+  fit <- fit_survey_xgb(
+    X = design$X,
+    y = design$y,
+    seed = seed,
+    nthread = xgb_nthread
+  )
+
+  if (length(feature) == 1L) {
+    main <- compute_shap_main(fit$model, fit$dall, feature_names = design$feature_names)
+    tab <- active_shap_by_group(feature, design$df[[feature]], main$shap_feat)
+    val <- tab$shap_active[tab$level == level]
+    if (length(val) != 1L) stop("Level not found for main direction: ", paste0(feature, "=", level))
+    return(as.numeric(val))
+  }
+
+  onehot1 <- paste0(feature[1], level[1])
+  onehot2 <- paste0(feature[2], level[2])
+
+  inter <- compute_shap_interaction(
+    fit$model,
+    design$X,
+    subsample_n = interaction_subsample_n,
+    seed = seed
+  )
+
+  feature_names <- design$feature_names
+  ii <- match(onehot1, feature_names)
+  jj <- match(onehot2, feature_names)
+  if (is.na(ii) || is.na(jj)) {
+    stop("One-hot not found in design matrix: ",
+         onehot1, if (is.na(ii)) " (missing)" else "",
+         " ; ",
+         onehot2, if (is.na(jj)) " (missing)" else "")
+  }
+
+  X_sub <- inter$X_sub
+  shap_int_feat <- inter$shap_int_feat
+
+  active_idx <- which(X_sub[, ii] != 0 & X_sub[, jj] != 0)
+  if (length(active_idx) == 0L) stop("No active rows for this level-pair in interaction subsample.")
+  mean(shap_int_feat[active_idx, ii, jj])
+}
+
+# ============================================================
+#' Bootstrap a single SHAP strength target (main effect or interaction)
+#'
+#' - If \code{feature} has length 1, returns the one-way (main) strength for that feature.
+#' - If \code{feature} has length 2, returns the two-way (interaction) strength for that feature pair.
+#'
+#' This function refits the XGBoost model in each bootstrap replicate (nonparametric bootstrap on rows).
+#'
+#' @param data A data.frame/tibble input (same style as \code{run_survey_shap()} uses).
+#' @param feature Character vector of length 1 (main) or 2 (interaction).
+#' @param B Integer number of bootstrap replicates.
+#' @param conf Confidence level for percentile CI (default 0.95).
+#' @param seed Optional integer seed for reproducibility.
+#' @param parallel Logical; use parallel workers via PSOCK cluster?
+#' @param n_cores Optional integer number of workers when \code{parallel=TRUE}.
+#' @param interaction_subsample_n Subsample size used inside interaction SHAP computation.
+#' @param xgb_nthread Optional integer; threads per XGBoost fit. Strongly recommended:
+#'   when \code{parallel=TRUE}, set \code{xgb_nthread=1} to avoid oversubscription.
+#' @return A list with \code{target}, \code{estimate}, \code{boot}, \code{summary}, and \code{meta}.
+#' @export
+boot_strength <- function(data,
+                          feature,
+                          B = 200L,
+                          conf = 0.95,
+                          seed = 1L,
+                          parallel = TRUE,
+                          n_cores = NULL,
+                          interaction_subsample_n = 5000L,
+                          xgb_nthread = NULL) {
+  if (is.matrix(data)) data <- as.data.frame(data)
+  if (!inherits(data, "data.frame")) {
+    stop("`data` must be a data.frame/tibble (or a matrix coercible to data.frame). ",
+         "Got class: ", paste(class(data), collapse = ", "))
+  }
+  stopifnot(is.character(feature), length(feature) %in% c(1L, 2L))
+
+  canon <- .canon_pair(feature)
+  feature <- canon$feature
+
+  estimate <- .compute_strength_target(
+    data = data,
+    feature = feature,
+    interaction_subsample_n = as.integer(interaction_subsample_n),
+    seed = seed,
+    xgb_nthread = xgb_nthread
+  )
+
+  FUN_one <- function(dat_b, seed) {
+    .compute_strength_target(
+      data = dat_b,
+      feature = feature,
+      interaction_subsample_n = as.integer(interaction_subsample_n),
+      seed = seed,
+      xgb_nthread = xgb_nthread
+    )
+  }
+
+  bt <- .bootstrap_scalar(
+    data = data,
+    B = B,
+    seed = seed,
+    parallel = parallel,
+    n_cores = n_cores,
+    FUN_one = FUN_one
+  )
+
+  target <- if (length(feature) == 1L) {
+    list(type = "strength_main", feature = feature)
+  } else {
+    list(type = "strength_interaction", feature = feature, pair = .make_pair_label(feature[1], feature[2]))
   }
 
   list(
-    baseline = list(
-      rslt = base,
-      strength_main = base_strength_main,
-      strength_pair = base_strength_pair,
-      direction_main = base_dir_main,
-      direction_int  = base_dir_int
-    ),
-    boot = list(
-      strength_main_mat = strength_main_mat,
-      strength_pair_mat = strength_pair_mat,
-      dir_main_mat = dir_main_mat,
-      dir_main_n_mat = dir_main_n_mat,
-      dir_int_mat = dir_int_mat,
-      dir_int_n_mat = dir_int_n_mat,
-      failures = failures
-    ),
+    target = target,
+    estimate = estimate,
+    boot = bt$boot,
+    summary = .summarise_boot_scalar(estimate, bt$boot, conf = conf),
     meta = list(
-      B = B,
+      B = as.integer(B),
+      conf = conf,
       seed = seed,
       parallel = parallel,
       n_cores = n_cores,
-      forwarded_args = names(run_args)
+      interaction_subsample_n = as.integer(interaction_subsample_n),
+      xgb_nthread = xgb_nthread
     )
   )
 }
 
-
-
-
-
-#' Summarise bootstrap results for strength tables
+# ============================================================
+#' Bootstrap a single SHAP direction target (active SHAP)
 #'
-#' @param boot_obj Output from \code{bootstrap_survey_shap()}.
-#' @param conf Confidence level.
-#' @param top_k Top-k probability cutoff.
-#' @return A list with \code{oneway} and \code{twoway} data.frames.
+#' Main case:
+#' \code{boot_direction(data, feature="partisan", level="Dem.")} returns the mean SHAP value
+#' for the one-hot \code{partisanDem.} among rows where that level is active.
+#'
+#' Interaction case:
+#' \code{boot_direction(data, feature=c(f1,f2), level=c(l1,l2))} returns the mean interaction SHAP
+#' for the one-hot pair \code{(f1l1, f2l2)} among rows where BOTH one-hots are active in the interaction subsample.
+#'
+#' This function refits the XGBoost model in each bootstrap replicate (nonparametric bootstrap on rows).
+#'
+#' @param data A data.frame/tibble input (same style as \code{run_survey_shap()} uses).
+#' @param feature Character vector length 1 (main) or 2 (interaction).
+#' @param level Character vector length 1 or 2; must match \code{feature} length.
+#' @param B Integer number of bootstrap replicates.
+#' @param conf Confidence level for percentile CI (default 0.95).
+#' @param seed Optional integer seed for reproducibility.
+#' @param parallel Logical; use parallel workers via PSOCK cluster?
+#' @param n_cores Optional integer number of workers when \code{parallel=TRUE}.
+#' @param interaction_subsample_n Subsample size used inside interaction SHAP computation.
+#' @param xgb_nthread Optional integer; threads per XGBoost fit. Strongly recommended:
+#'   when \code{parallel=TRUE}, set \code{xgb_nthread=1} to avoid oversubscription.
+#' @return A list with \code{target}, \code{estimate}, \code{boot}, \code{summary}, and \code{meta}.
 #' @export
-summarise_bootstrap_strength <- function(boot_obj, conf = 0.95, top_k = 5) {
-  mat_sum <- function(mat, hat, conf, top_k) {
-    nm <- colnames(mat)
-    alpha <- (1 - conf) / 2
-    probs <- c(alpha, 1 - alpha)
+boot_direction <- function(data,
+                           feature,
+                           level,
+                           B = 200L,
+                           conf = 0.95,
+                           seed = 1L,
+                           parallel = TRUE,
+                           n_cores = NULL,
+                           interaction_subsample_n = 5000L,
+                           xgb_nthread = NULL) {
+  if (is.matrix(data)) data <- as.data.frame(data)
+  if (!inherits(data, "data.frame")) {
+    stop("`data` must be a data.frame/tibble (or a matrix coercible to data.frame). ",
+         "Got class: ", paste(class(data), collapse = ", "))
+  }
+  stopifnot(is.character(feature), length(feature) %in% c(1L, 2L))
+  stopifnot(is.character(level), length(level) == length(feature))
 
-    mean_b <- apply(mat, 2, function(x) mean(x, na.rm = TRUE))
-    sd_b   <- apply(mat, 2, function(x) stats::sd(x, na.rm = TRUE))
-    ci     <- t(apply(mat, 2, function(x) stats::quantile(x, probs = probs, na.rm = TRUE, names = FALSE)))
-    colnames(ci) <- c("ci_lo", "ci_hi")
-    present_prob <- apply(mat, 2, function(x) mean(!is.na(x)))
+  canon <- .canon_pair(feature, level)
+  feature <- canon$feature
+  level <- canon$level
 
-    topk_prob <- rep(NA_real_, length(nm))
-    if (ncol(mat) > 0) {
-      topk_count <- rep(0L, length(nm))
-      for (b in seq_len(nrow(mat))) {
-        x <- mat[b, ]
-        if (all(is.na(x))) next
-        kk <- min(top_k, sum(!is.na(x)))
-        idx <- order(x, decreasing = TRUE, na.last = NA)[seq_len(kk)]
-        topk_count[idx] <- topk_count[idx] + 1L
-      }
-      topk_prob <- topk_count / nrow(mat)
-    }
+  estimate <- .compute_direction_target(
+    data = data,
+    feature = feature,
+    level = level,
+    interaction_subsample_n = as.integer(interaction_subsample_n),
+    seed = seed,
+    xgb_nthread = xgb_nthread
+  )
 
-    est <- rep(NA_real_, length(nm)); names(est) <- nm
-    keep <- intersect(names(hat), nm)
-    est[keep] <- hat[keep]
-
-    data.frame(
-      key = nm,
-      estimate = as.numeric(est),
-      mean_boot = as.numeric(mean_b),
-      sd_boot = as.numeric(sd_b),
-      ci_lo = ci[, "ci_lo"],
-      ci_hi = ci[, "ci_hi"],
-      present_prob = as.numeric(present_prob),
-      topk_prob = as.numeric(topk_prob),
-      stringsAsFactors = FALSE
+  FUN_one <- function(dat_b, seed) {
+    .compute_direction_target(
+      data = dat_b,
+      feature = feature,
+      level = level,
+      interaction_subsample_n = as.integer(interaction_subsample_n),
+      seed = seed,
+      xgb_nthread = xgb_nthread
     )
   }
 
-  sm <- mat_sum(
-    boot_obj$boot$strength_main_mat,
-    boot_obj$baseline$strength_main,
-    conf = conf,
-    top_k = top_k
-  )
-  sp <- mat_sum(
-    boot_obj$boot$strength_pair_mat,
-    boot_obj$baseline$strength_pair,
-    conf = conf,
-    top_k = top_k
+  bt <- .bootstrap_scalar(
+    data = data,
+    B = B,
+    seed = seed,
+    parallel = parallel,
+    n_cores = n_cores,
+    FUN_one = FUN_one
   )
 
-  list(oneway = sm, twoway = sp)
-}
-
-
-#' Summarise bootstrap results for direction tables (main + interaction)
-#'
-#' @param boot_obj Output from \code{bootstrap_survey_shap()}.
-#' @param conf Confidence level.
-#' @param top_k Top-k probability cutoff for positive/negative separately.
-#' @return A list with \code{main} and \code{interaction} data.frames.
-#' @export
-summarise_bootstrap_direction <- function(boot_obj, conf = 0.95, top_k = 10) {
-  dir_sum <- function(mat, hat, conf, top_k) {
-    nm <- colnames(mat)
-    alpha <- (1 - conf) / 2
-    probs <- c(alpha, 1 - alpha)
-
-    mean_b <- apply(mat, 2, function(x) mean(x, na.rm = TRUE))
-    sd_b   <- apply(mat, 2, function(x) stats::sd(x, na.rm = TRUE))
-    ci     <- t(apply(mat, 2, function(x) stats::quantile(x, probs = probs, na.rm = TRUE, names = FALSE)))
-    colnames(ci) <- c("ci_lo", "ci_hi")
-    present_prob <- apply(mat, 2, function(x) mean(!is.na(x)))
-
-    pos_prob <- rep(NA_real_, length(nm))
-    neg_prob <- rep(NA_real_, length(nm))
-
-    if (ncol(mat) > 0) {
-      pos_count <- rep(0L, length(nm))
-      neg_count <- rep(0L, length(nm))
-      for (b in seq_len(nrow(mat))) {
-        x <- mat[b, ]
-        if (all(is.na(x))) next
-        kk <- min(top_k, sum(!is.na(x)))
-
-        idx_pos <- order(x, decreasing = TRUE, na.last = NA)[seq_len(kk)]
-        idx_neg <- order(x, decreasing = FALSE, na.last = NA)[seq_len(kk)]
-
-        pos_count[idx_pos] <- pos_count[idx_pos] + 1L
-        neg_count[idx_neg] <- neg_count[idx_neg] + 1L
-      }
-      pos_prob <- pos_count / nrow(mat)
-      neg_prob <- neg_count / nrow(mat)
-    }
-
-    est <- rep(NA_real_, length(nm)); names(est) <- nm
-    keep <- intersect(names(hat), nm)
-    est[keep] <- hat[keep]
-
-    data.frame(
-      key = nm,
-      estimate = as.numeric(est),
-      mean_boot = as.numeric(mean_b),
-      sd_boot = as.numeric(sd_b),
-      ci_lo = ci[, "ci_lo"],
-      ci_hi = ci[, "ci_hi"],
-      present_prob = as.numeric(present_prob),
-      top_pos_prob = as.numeric(pos_prob),
-      top_neg_prob = as.numeric(neg_prob),
-      stringsAsFactors = FALSE
+  target <- if (length(feature) == 1L) {
+    list(type = "direction_main", feature = feature, level = level, onehot = paste0(feature, level))
+  } else {
+    list(
+      type = "direction_interaction",
+      feature = feature,
+      level = level,
+      onehot = c(paste0(feature[1], level[1]), paste0(feature[2], level[2])),
+      pair = .make_pair_label(feature[1], feature[2])
     )
   }
 
-  dm_hat <- boot_obj$baseline$direction_main$v
-  di_hat <- boot_obj$baseline$direction_int$v
-
-  dm <- dir_sum(boot_obj$boot$dir_main_mat, dm_hat, conf = conf, top_k = top_k)
-  di <- dir_sum(boot_obj$boot$dir_int_mat,  di_hat, conf = conf, top_k = top_k)
-
-  list(main = dm, interaction = di)
-}
-
-
-#' Decode main direction keys "onehot" into (variable, level)
-#'
-#' In your repo, one-way direction keys are stored as one-hot column names like:
-#'   "partisanDem", "raceWhite", "genderMen", "collegeYes", "gun_ownYes"
-#'
-#' This helper splits the key by matching known prefixes.
-#'
-#' @param df A data.frame with column \code{key} that equals the one-hot name.
-#' @param prefixes Character vector of group prefixes (default matches your package).
-#' @return The same data.frame with added \code{variable} and \code{level} columns.
-#' @export
-decode_main_direction_keys <- function(df,
-                                       prefixes = c("gun_own", "partisan", "race", "gender", "college")) {
-  stopifnot(is.data.frame(df), "key" %in% names(df))
-  df$variable <- NA_character_
-  df$level <- NA_character_
-
-  for (pfx in prefixes) {
-    hit <- startsWith(df$key, pfx)
-    if (any(hit)) {
-      df$variable[hit] <- pfx
-      df$level[hit] <- substring(df$key[hit], nchar(pfx) + 1L)
-    }
-  }
-  df
-}
-
-
-#' Decode interaction direction keys "feat_i×feat_j" into columns
-#'
-#' @param df A data.frame with column \code{key}.
-#' @return The same data.frame with added \code{feat_i} and \code{feat_j} columns.
-#' @export
-decode_interaction_direction_keys <- function(df) {
-  stopifnot(is.data.frame(df), "key" %in% names(df))
-  sp <- strsplit(df$key, "×", fixed = TRUE)
-  df$feat_i <- vapply(sp, `[`, character(1), 1)
-  df$feat_j <- vapply(sp, function(x) paste(x[-1], collapse = "×"), character(1))
-  df
+  list(
+    target = target,
+    estimate = estimate,
+    boot = bt$boot,
+    summary = .summarise_boot_scalar(estimate, bt$boot, conf = conf),
+    meta = list(
+      B = as.integer(B),
+      conf = conf,
+      seed = seed,
+      parallel = parallel,
+      n_cores = n_cores,
+      interaction_subsample_n = as.integer(interaction_subsample_n),
+      xgb_nthread = xgb_nthread
+    )
+  )
 }

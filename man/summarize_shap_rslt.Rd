@@ -28,6 +28,8 @@ An object of class \code{surveySHAP_summary} (a named list) containing:
 \describe{
 \item{strength_main_group}{Group-level one-way strength table.}
 \item{strength_interaction_group}{Group-level two-way strength table.}
+\item{direction_main_complete}{Complete one-way direction table (no filtering), with feature/level columns.}
+\item{direction_interaction_complete}{Complete two-way direction table (no filtering), with feature/level columns.}
 \item{direction_main_top}{Top \code{top_n} one-way directional rows (after filtering).}
 \item{direction_main_bottom}{Bottom \code{top_n} one-way directional rows (after filtering).}
 \item{direction_interaction_top}{Top \code{top_n} interaction directional rows (after filtering).}
