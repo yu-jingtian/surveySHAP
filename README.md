@@ -241,34 +241,40 @@ summarize_shap_rslt(
 out1 <- boot_strength(data = dat, feature = "partisan", B = 30, seed = 1,
                       parallel = TRUE, n_cores = 8)
 ```
-|   estimate mean_boot  |  sd_boot  |   ci_lo  |   ci_hi | present_prob|
-|-----------|--------------------|-----------|---------|------------------|
+|   estimate| mean_boot  |  sd_boot  |   ci_lo |   ci_hi | present_prob|
+|-----------|------------|-----------|---------|---------|-------------|
 | 0.1820362 |0.1863809| 0.00565656| 0.1786726| 0.1981759   |         1|
 
 ```r
-> # interaction strength
-> out2 <- boot_strength(dat, feature = c("gun_own", "partisan"), B = 30, seed = 1,
-+                       parallel = TRUE, n_cores = 8)
-> out2$summary
-    estimate  mean_boot      sd_boot      ci_lo      ci_hi present_prob
-1 0.01949454 0.02080623 0.0009580798 0.01910883 0.02286928            1
-> 
-> # main direction
-> out3 <- boot_direction(dat, feature = "partisan", level = "Dem.", B = 30, seed = 1,
-+                        parallel = TRUE, n_cores = 8)
-> out3$summary
-   estimate mean_boot   sd_boot     ci_lo     ci_hi present_prob
-1 0.1449576 0.1499139 0.0112035 0.1267271 0.1662842            1
-> 
-> # interaction direction
-> out4 <- boot_direction(dat,
-+                        feature = c("gun_own", "partisan"),
-+                        level   = c("No guns in HH", "Dem."),
-+                        B = 30, seed = 1,
-+                        parallel = TRUE, n_cores = 8)
-> out4$summary
-     estimate   mean_boot     sd_boot       ci_lo        ci_hi present_prob
-1 -0.01175205 -0.01158054 0.001876561 -0.01421952 -0.007755951            1
+# interaction strength
+out2 <- boot_strength(dat, feature = c("gun_own", "partisan"), B = 30, seed = 1,
+                      parallel = TRUE, n_cores = 8)
+```
+
+|   estimate| mean_boot  |  sd_boot  |   ci_lo |   ci_hi | present_prob|
+|-----------|------------|-----------|---------|---------|-------------|
+| 0.01949454 |0.02080623 |0.0009580798 |0.01910883 |0.02286928     |  1|
+
+```r
+# main direction
+out3 <- boot_direction(dat, feature = "partisan", level = "Dem.", B = 30, seed = 1,
+                       parallel = TRUE, n_cores = 8)
+```
+|   estimate| mean_boot  |  sd_boot  |   ci_lo |   ci_hi | present_prob|
+|-----------|------------|-----------|---------|---------|-------------|
+| 0.1449576| 0.1499139| 0.0112035| 0.1267271| 0.1662842|            1|
+
+```r
+# interaction direction
+out4 <- boot_direction(dat,
+                       feature = c("gun_own", "partisan"),
+                       level   = c("No guns in HH", "Dem."),
+                       B = 30, seed = 1,
+                       parallel = TRUE, n_cores = 8)
+```
+|   estimate| mean_boot  |  sd_boot  |   ci_lo |   ci_hi | present_prob|
+|-----------|------------|-----------|---------|---------|-------------|
+| -0.01175205| -0.01158054| 0.001876561| -0.01421952| -0.007755951|     1|
 ```
 
 ## License
