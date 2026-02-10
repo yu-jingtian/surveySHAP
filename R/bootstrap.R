@@ -3,17 +3,17 @@
 # - boot_strength(): bootstrap ONE strength target (main or interaction)
 # - boot_direction(): bootstrap ONE direction target (main or interaction level-pair)
 #
-# Drop this whole file into R/ (e.g., R/bootstrap.R)
+# Drop this whole file into R/ (e.g., R/bootstrap_targeted.R)
 ############################################################
 
-# ============================================================
-# Targeted bootstrap wrappers (thread-aware)
-# Depends on existing package functions:
+# NOTE:
+# These functions intentionally reuse your existing package internals:
 #   build_xgb_design(), fit_survey_xgb(), compute_shap_main(), compute_shap_interaction(),
 #   shap_strength_main_group(), shap_strength_interaction_group(), active_shap_by_group()
-# ============================================================
+#
+# They do NOT rely on your old "bootstrap everything then summarize" workflow.
 
-# ---- internal helpers --------------------------------------
+# --- internal helpers ---------------------------------------------------------
 
 .canon_pair <- function(feature, level = NULL) {
   stopifnot(is.character(feature), length(feature) %in% c(1L, 2L))
@@ -21,9 +21,14 @@
     if (!is.null(level)) stopifnot(length(level) == 1L)
     return(list(feature = feature, level = level))
   }
+
+  stopifnot(length(feature) == 2L)
   if (!is.null(level)) stopifnot(length(level) == 2L)
+
   ord <- order(feature)
-  list(feature = feature[ord], level = if (is.null(level)) NULL else level[ord])
+  feature2 <- feature[ord]
+  level2 <- if (is.null(level)) NULL else level[ord]
+  list(feature = feature2, level = level2)
 }
 
 .make_pair_label <- function(f1, f2) {
@@ -62,41 +67,46 @@
 }
 
 .bootstrap_scalar <- function(data, B, seed, parallel, n_cores, FUN_one) {
-  # allow tibble; allow matrix (coerce)
-  if (is.matrix(data)) data <- as.data.frame(data)
-  if (!inherits(data, "data.frame")) {
-    stop("`data` must be a data.frame/tibble (or a matrix coercible to data.frame). ",
-         "Got class: ", paste(class(data), collapse = ", "))
-  }
-
+  stopifnot(is.data.frame(data))
   B <- as.integer(B)
   if (B < 1L) stop("B must be >= 1")
+
   if (!is.null(seed)) seed <- as.integer(seed)
 
-  # deterministic per-rep seeds
-  seeds <- if (is.null(seed)) {
-    sample.int(.Machine$integer.max, B)
+  # deterministic per-replicate seeds
+  if (is.null(seed)) {
+    seeds <- sample.int(.Machine$integer.max, B)
   } else {
-    seed + seq_len(B)
+    seeds <- seed + seq_len(B)
   }
 
   n <- nrow(data)
 
+  # worker function
   one_rep <- function(b) {
     s <- seeds[b]
     set.seed(s)
     idx <- sample.int(n, n, replace = TRUE)
     dat_b <- data[idx, , drop = FALSE]
-    tryCatch(FUN_one(dat_b, seed = s), error = function(e) NA_real_)
+
+    # run computation; fail -> NA
+    out <- tryCatch(
+      FUN_one(dat_b, seed = s),
+      error = function(e) NA_real_
+    )
+    as.numeric(out)
   }
 
   if (isTRUE(parallel)) {
-    if (is.null(n_cores)) n_cores <- max(1L, parallel::detectCores() - 1L)
+    if (is.null(n_cores)) {
+      n_cores <- max(1L, parallel::detectCores() - 1L)
+    }
     n_cores <- as.integer(n_cores)
 
     cl <- parallel::makeCluster(n_cores)
     on.exit(parallel::stopCluster(cl), add = TRUE)
 
+    # Load packages needed on workers
     parallel::clusterEvalQ(cl, {
       suppressPackageStartupMessages({
         library(xgboost)
@@ -105,14 +115,18 @@
       NULL
     })
 
-    # Export needed symbols from current environment/namespace
+    # Export symbols from current namespace/session.
+    # Assumes this file is part of the package namespace when running in-package.
     to_export <- unique(c(
+      # from this file
       ".canon_pair", ".make_pair_label", ".summarise_boot_scalar", ".bootstrap_scalar",
+      # core pipeline functions you already have in your package
       "build_xgb_design", "fit_survey_xgb",
       "compute_shap_main", "compute_shap_interaction",
       "shap_strength_main_group", "shap_strength_interaction_group",
       "active_shap_by_group"
     ))
+
     parallel::clusterExport(cl, varlist = to_export, envir = environment())
 
     boot <- unlist(parallel::parLapply(cl, seq_len(B), one_rep), use.names = FALSE)
@@ -120,22 +134,22 @@
     boot <- vapply(seq_len(B), one_rep, numeric(1))
   }
 
-  list(boot = as.numeric(boot), seeds = seeds)
+  list(boot = boot, seeds = seeds)
 }
 
-# ---- core scalar targets -----------------------------------
+# --- target computations ------------------------------------------------------
 
-.compute_strength_target <- function(data, feature, interaction_subsample_n, seed, xgb_nthread) {
+.compute_strength_target <- function(data, feature, interaction_subsample_n, seed) {
   feature <- .canon_pair(feature)$feature
 
   design <- build_xgb_design(data)
 
-  fit <- fit_survey_xgb(
-    X = design$X,
-    y = design$y,
-    seed = seed,
-    nthread = xgb_nthread
-  )
+  # fit
+  if (is.null(seed)) {
+    fit <- fit_survey_xgb(design$X, design$y)
+  } else {
+    fit <- fit_survey_xgb(design$X, design$y, seed = as.integer(seed))
+  }
 
   if (length(feature) == 1L) {
     main <- compute_shap_main(fit$model, fit$dall, feature_names = design$feature_names)
@@ -145,62 +159,68 @@
     return(as.numeric(val))
   }
 
-  inter <- compute_shap_interaction(
-    fit$model,
-    design$X,
-    subsample_n = interaction_subsample_n,
-    seed = seed
-  )
+  # interaction strength
+  if (is.null(seed)) {
+    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n)
+  } else {
+    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, seed = as.integer(seed))
+  }
 
   df_int <- shap_strength_interaction_group(inter$shap_int_feat, design$feature_names)
+
   pair_label <- .make_pair_label(feature[1], feature[2])
   val <- df_int$strength[df_int$pair == pair_label]
   if (length(val) != 1L) stop("Pair not found in strength_interaction: ", pair_label)
   as.numeric(val)
 }
 
-.compute_direction_target <- function(data, feature, level, interaction_subsample_n, seed, xgb_nthread) {
+.compute_direction_target <- function(data, feature, level, interaction_subsample_n, seed) {
   canon <- .canon_pair(feature, level)
   feature <- canon$feature
   level <- canon$level
 
   design <- build_xgb_design(data)
 
-  fit <- fit_survey_xgb(
-    X = design$X,
-    y = design$y,
-    seed = seed,
-    nthread = xgb_nthread
-  )
+  # fit
+  if (is.null(seed)) {
+    fit <- fit_survey_xgb(design$X, design$y)
+  } else {
+    fit <- fit_survey_xgb(design$X, design$y, seed = as.integer(seed))
+  }
 
+  # main shap always needed for main direction
   if (length(feature) == 1L) {
     main <- compute_shap_main(fit$model, fit$dall, feature_names = design$feature_names)
+
+    # active_shap_by_group already returns mean by level
     tab <- active_shap_by_group(feature, design$df[[feature]], main$shap_feat)
     val <- tab$shap_active[tab$level == level]
     if (length(val) != 1L) stop("Level not found for main direction: ", paste0(feature, "=", level))
     return(as.numeric(val))
   }
 
+  # interaction direction for (feat1,level1) × (feat2,level2)
   onehot1 <- paste0(feature[1], level[1])
   onehot2 <- paste0(feature[2], level[2])
 
-  inter <- compute_shap_interaction(
-    fit$model,
-    design$X,
-    subsample_n = interaction_subsample_n,
-    seed = seed
-  )
+  if (is.null(seed)) {
+    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n)
+  } else {
+    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, seed = as.integer(seed))
+  }
 
   feature_names <- design$feature_names
   ii <- match(onehot1, feature_names)
   jj <- match(onehot2, feature_names)
   if (is.na(ii) || is.na(jj)) {
     stop("One-hot not found in design matrix: ",
-         onehot1, if (is.na(ii)) " (missing)" else "",
+         paste0(onehot1, if (is.na(ii)) " (missing)" else ""),
          " ; ",
-         onehot2, if (is.na(jj)) " (missing)" else "")
+         paste0(onehot2, if (is.na(jj)) " (missing)" else ""))
   }
 
+  # shap_int_feat is m x p x p with p = length(feature_names)
+  # X_sub is m x p used for predinteraction
   X_sub <- inter$X_sub
   shap_int_feat <- inter$shap_int_feat
 
@@ -209,25 +229,19 @@
   mean(shap_int_feat[active_idx, ii, jj])
 }
 
-# ============================================================
+# --- exported: boot_strength --------------------------------------------------
+
 #' Bootstrap a single SHAP strength target (main effect or interaction)
 #'
-#' - If \code{feature} has length 1, returns the one-way (main) strength for that feature.
-#' - If \code{feature} has length 2, returns the two-way (interaction) strength for that feature pair.
-#'
-#' This function refits the XGBoost model in each bootstrap replicate (nonparametric bootstrap on rows).
-#'
-#' @param data A data.frame/tibble input (same style as \code{run_survey_shap()} uses).
-#' @param feature Character vector of length 1 (main) or 2 (interaction).
-#' @param B Integer number of bootstrap replicates.
-#' @param conf Confidence level for percentile CI (default 0.95).
+#' @param data Input data.frame (same as run_survey_shap()).
+#' @param feature Character vector length 1 (main) or 2 (interaction).
+#' @param B Number of bootstrap replicates.
+#' @param conf CI level for percentile CI (default 0.95).
 #' @param seed Optional integer seed for reproducibility.
-#' @param parallel Logical; use parallel workers via PSOCK cluster?
-#' @param n_cores Optional integer number of workers when \code{parallel=TRUE}.
-#' @param interaction_subsample_n Subsample size used inside interaction SHAP computation.
-#' @param xgb_nthread Optional integer; threads per XGBoost fit. Strongly recommended:
-#'   when \code{parallel=TRUE}, set \code{xgb_nthread=1} to avoid oversubscription.
-#' @return A list with \code{target}, \code{estimate}, \code{boot}, \code{summary}, and \code{meta}.
+#' @param parallel Logical; use parallel workers?
+#' @param n_cores Optional integer number of workers when parallel=TRUE.
+#' @param interaction_subsample_n Subsample size for interaction SHAP.
+#' @return A list with target, estimate, boot vector, and summary.
 #' @export
 boot_strength <- function(data,
                           feature,
@@ -236,33 +250,28 @@ boot_strength <- function(data,
                           seed = 1L,
                           parallel = TRUE,
                           n_cores = NULL,
-                          interaction_subsample_n = 5000L,
-                          xgb_nthread = NULL) {
-  if (is.matrix(data)) data <- as.data.frame(data)
-  if (!inherits(data, "data.frame")) {
-    stop("`data` must be a data.frame/tibble (or a matrix coercible to data.frame). ",
-         "Got class: ", paste(class(data), collapse = ", "))
-  }
+                          interaction_subsample_n = 5000L) {
+  stopifnot(is.data.frame(data))
   stopifnot(is.character(feature), length(feature) %in% c(1L, 2L))
 
   canon <- .canon_pair(feature)
   feature <- canon$feature
 
+  # baseline estimate (non-bootstrap)
   estimate <- .compute_strength_target(
     data = data,
     feature = feature,
-    interaction_subsample_n = as.integer(interaction_subsample_n),
-    seed = seed,
-    xgb_nthread = xgb_nthread
+    interaction_subsample_n = interaction_subsample_n,
+    seed = seed
   )
 
+  # bootstrap
   FUN_one <- function(dat_b, seed) {
     .compute_strength_target(
       data = dat_b,
       feature = feature,
-      interaction_subsample_n = as.integer(interaction_subsample_n),
-      seed = seed,
-      xgb_nthread = xgb_nthread
+      interaction_subsample_n = interaction_subsample_n,
+      seed = seed
     )
   }
 
@@ -286,43 +295,29 @@ boot_strength <- function(data,
     estimate = estimate,
     boot = bt$boot,
     summary = .summarise_boot_scalar(estimate, bt$boot, conf = conf),
-    meta = list(
-      B = as.integer(B),
-      conf = conf,
-      seed = seed,
-      parallel = parallel,
-      n_cores = n_cores,
-      interaction_subsample_n = as.integer(interaction_subsample_n),
-      xgb_nthread = xgb_nthread
-    )
+    meta = list(B = as.integer(B), conf = conf, seed = seed, parallel = parallel, n_cores = n_cores,
+                interaction_subsample_n = as.integer(interaction_subsample_n))
   )
 }
 
-# ============================================================
+# --- exported: boot_direction -------------------------------------------------
+
 #' Bootstrap a single SHAP direction target (active SHAP)
 #'
-#' Main case:
-#' \code{boot_direction(data, feature="partisan", level="Dem.")} returns the mean SHAP value
-#' for the one-hot \code{partisanDem.} among rows where that level is active.
+#' Main: direction(feature="partisan", level="Dem.") = mean active SHAP for that level.
+#' Interaction: direction((feat1,level1) × (feat2,level2)) = mean interaction SHAP among rows
+#' where BOTH one-hot indicators are active in the interaction subsample.
 #'
-#' Interaction case:
-#' \code{boot_direction(data, feature=c(f1,f2), level=c(l1,l2))} returns the mean interaction SHAP
-#' for the one-hot pair \code{(f1l1, f2l2)} among rows where BOTH one-hots are active in the interaction subsample.
-#'
-#' This function refits the XGBoost model in each bootstrap replicate (nonparametric bootstrap on rows).
-#'
-#' @param data A data.frame/tibble input (same style as \code{run_survey_shap()} uses).
-#' @param feature Character vector length 1 (main) or 2 (interaction).
-#' @param level Character vector length 1 or 2; must match \code{feature} length.
-#' @param B Integer number of bootstrap replicates.
-#' @param conf Confidence level for percentile CI (default 0.95).
+#' @param data Input data.frame.
+#' @param feature Character vector length 1 or 2.
+#' @param level Character vector length 1 or 2 (must match feature length).
+#' @param B Number of bootstrap replicates.
+#' @param conf CI level for percentile CI (default 0.95).
 #' @param seed Optional integer seed for reproducibility.
-#' @param parallel Logical; use parallel workers via PSOCK cluster?
-#' @param n_cores Optional integer number of workers when \code{parallel=TRUE}.
-#' @param interaction_subsample_n Subsample size used inside interaction SHAP computation.
-#' @param xgb_nthread Optional integer; threads per XGBoost fit. Strongly recommended:
-#'   when \code{parallel=TRUE}, set \code{xgb_nthread=1} to avoid oversubscription.
-#' @return A list with \code{target}, \code{estimate}, \code{boot}, \code{summary}, and \code{meta}.
+#' @param parallel Logical; use parallel workers?
+#' @param n_cores Optional integer number of workers when parallel=TRUE.
+#' @param interaction_subsample_n Subsample size for interaction SHAP.
+#' @return A list with target, estimate, boot vector, and summary.
 #' @export
 boot_direction <- function(data,
                            feature,
@@ -332,13 +327,8 @@ boot_direction <- function(data,
                            seed = 1L,
                            parallel = TRUE,
                            n_cores = NULL,
-                           interaction_subsample_n = 5000L,
-                           xgb_nthread = NULL) {
-  if (is.matrix(data)) data <- as.data.frame(data)
-  if (!inherits(data, "data.frame")) {
-    stop("`data` must be a data.frame/tibble (or a matrix coercible to data.frame). ",
-         "Got class: ", paste(class(data), collapse = ", "))
-  }
+                           interaction_subsample_n = 5000L) {
+  stopifnot(is.data.frame(data))
   stopifnot(is.character(feature), length(feature) %in% c(1L, 2L))
   stopifnot(is.character(level), length(level) == length(feature))
 
@@ -350,9 +340,8 @@ boot_direction <- function(data,
     data = data,
     feature = feature,
     level = level,
-    interaction_subsample_n = as.integer(interaction_subsample_n),
-    seed = seed,
-    xgb_nthread = xgb_nthread
+    interaction_subsample_n = interaction_subsample_n,
+    seed = seed
   )
 
   FUN_one <- function(dat_b, seed) {
@@ -360,9 +349,8 @@ boot_direction <- function(data,
       data = dat_b,
       feature = feature,
       level = level,
-      interaction_subsample_n = as.integer(interaction_subsample_n),
-      seed = seed,
-      xgb_nthread = xgb_nthread
+      interaction_subsample_n = interaction_subsample_n,
+      seed = seed
     )
   }
 
@@ -392,14 +380,7 @@ boot_direction <- function(data,
     estimate = estimate,
     boot = bt$boot,
     summary = .summarise_boot_scalar(estimate, bt$boot, conf = conf),
-    meta = list(
-      B = as.integer(B),
-      conf = conf,
-      seed = seed,
-      parallel = parallel,
-      n_cores = n_cores,
-      interaction_subsample_n = as.integer(interaction_subsample_n),
-      xgb_nthread = xgb_nthread
-    )
+    meta = list(B = as.integer(B), conf = conf, seed = seed, parallel = parallel, n_cores = n_cores,
+                interaction_subsample_n = as.integer(interaction_subsample_n))
   )
 }
