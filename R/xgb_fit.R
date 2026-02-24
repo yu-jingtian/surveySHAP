@@ -1,7 +1,14 @@
-#' Fit an XGBoost regression model for survey outcome
+#' Fit an XGBoost model for the survey outcome
+#'
+#' Supports optional sample weights (e.g., survey weights).
+#'
+#' For the updated data structure, the recommended label is the implied
+#' proportion `gun_control / trials` with a logistic objective ("reg:logistic").
 #'
 #' @param X A sparse matrix (\code{dgCMatrix}) of features.
-#' @param y Numeric outcome vector.
+#' @param y Numeric outcome vector used for training (e.g., proportion in [0,1]).
+#' @param w Optional numeric vector of sample weights (length n). If provided,
+#'   passed to \code{xgboost::xgb.DMatrix(weight = ...)}.
 #' @param params XGBoost parameter list. If \code{params$seed} is not provided and
 #'   \code{seed} is not \code{NULL}, the function sets \code{params$seed = seed}.
 #' @param nrounds Number of boosting rounds.
@@ -12,8 +19,10 @@
 #' @export
 fit_survey_xgb <- function(X,
                            y,
+                           w = NULL,
                            params = list(
-                             objective = "reg:squarederror",
+                             objective = "reg:logistic",
+                             eval_metric = "logloss",
                              max_depth = 4,
                              eta = 0.05,
                              subsample = 0.8,
@@ -28,7 +37,13 @@ fit_survey_xgb <- function(X,
   }
   if (is.null(params$verbosity)) params$verbosity <- as.integer(verbose)
 
-  dall <- xgboost::xgb.DMatrix(data = X, label = y)
+  if (!is.null(w)) {
+    w <- as.numeric(w)
+    if (length(w) != nrow(X)) stop("`w` must have length nrow(X).")
+    if (any(!is.finite(w)) || any(w < 0)) stop("`w` must be finite and nonnegative.")
+  }
+
+  dall <- xgboost::xgb.DMatrix(data = X, label = y, weight = w)
 
   model <- xgboost::xgb.train(
     params = params,

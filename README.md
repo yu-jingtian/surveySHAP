@@ -107,9 +107,16 @@ Run the full XGBoost + SHAP workflow with a single call:
 shap_rslt <- run_survey_shap(survey_data)
 ```
 
+**Notes (updated outcome + weights):**
+
+- The outcome `gun_control` is a 0–6 index (sum of 6 binary items). The default XGBoost fit models the implied proportion `gun_control/6` with a logistic link (`objective = "reg:logistic"`).
+- SHAP values are therefore additive on the **logit scale** of the implied proportion. Positive SHAP values increase the predicted restrictiveness propensity; negative values decrease it.
+- If the `weight` column is present, the model is trained with sample weights and all SHAP summaries (strength/direction) use weighted averages.
+
+
 This function:
 1. Builds a full one-hot encoded sparse design matrix (no dropped reference levels)
-2. Fits an XGBoost regression model
+2. Fits an XGBoost model for the implied proportion (gun_control/6) with a logistic link (binomial-style)
 3. Computes main-effect SHAP values
 4. Computes interaction SHAP values on a subsample
 5. Aggregates results to interpretable group-level summaries
@@ -171,7 +178,7 @@ summarize_shap_rslt(
 | partisan  | 0.18185593  |
 | gun_own   | 0.08811271  |
 | gender    | 0.03016185  |
-| college   | 0.01778079  |
+| educ      | 0.01778079  |
 | race      | 0.01162914  |
 
 ---
@@ -183,13 +190,13 @@ summarize_shap_rslt(
 | gun_own × partisan      | 0.0191926630 |
 | partisan × race         | 0.0129670057 |
 | gender × partisan       | 0.0106519856 |
-| college × partisan      | 0.0086285716 |
+| educ × partisan      | 0.0086285716 |
 | gender × gun_own        | 0.0040878162 |
 | gun_own × race          | 0.0039177700 |
-| college × gun_own       | 0.0034441383 |
-| college × race          | 0.0014474342 |
+| educ × gun_own       | 0.0034441383 |
+| educ × race          | 0.0014474342 |
 | gender × race           | 0.0012783710 |
-| college × gender        | 0.0008779862 |
+| educ × gender        | 0.0008779862 |
 
 ---
 

@@ -109,6 +109,7 @@
     # Load packages needed on workers
     parallel::clusterEvalQ(cl, {
       suppressPackageStartupMessages({
+        library(surveySHAP)
         library(xgboost)
         library(Matrix)
       })
@@ -146,14 +147,14 @@
 
   # fit
   if (is.null(seed)) {
-    fit <- fit_survey_xgb(design$X, design$y)
+    fit <- fit_survey_xgb(design$X, design$y, w = design$w)
   } else {
-    fit <- fit_survey_xgb(design$X, design$y, seed = as.integer(seed))
+    fit <- fit_survey_xgb(design$X, design$y, w = design$w, seed = as.integer(seed))
   }
 
   if (length(feature) == 1L) {
     main <- compute_shap_main(fit$model, fit$dall, feature_names = design$feature_names)
-    df_strength <- shap_strength_main_group(main$shap_feat, design$feature_names)
+    df_strength <- shap_strength_main_group(main$shap_feat, design$feature_names, w = design$w)
     val <- df_strength$strength[df_strength$group == feature]
     if (length(val) != 1L) stop("Group not found in strength_main: ", feature)
     return(as.numeric(val))
@@ -161,12 +162,12 @@
 
   # interaction strength
   if (is.null(seed)) {
-    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n)
+    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, w_full = design$w)
   } else {
-    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, seed = as.integer(seed))
+    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, seed = as.integer(seed), w_full = design$w)
   }
 
-  df_int <- shap_strength_interaction_group(inter$shap_int_feat, design$feature_names)
+  df_int <- shap_strength_interaction_group(inter$shap_int_feat, design$feature_names, w = inter$w_sub)
 
   pair_label <- .make_pair_label(feature[1], feature[2])
   val <- df_int$strength[df_int$pair == pair_label]
@@ -183,9 +184,9 @@
 
   # fit
   if (is.null(seed)) {
-    fit <- fit_survey_xgb(design$X, design$y)
+    fit <- fit_survey_xgb(design$X, design$y, w = design$w)
   } else {
-    fit <- fit_survey_xgb(design$X, design$y, seed = as.integer(seed))
+    fit <- fit_survey_xgb(design$X, design$y, w = design$w, seed = as.integer(seed))
   }
 
   # main shap always needed for main direction
@@ -193,7 +194,7 @@
     main <- compute_shap_main(fit$model, fit$dall, feature_names = design$feature_names)
 
     # active_shap_by_group already returns mean by level
-    tab <- active_shap_by_group(feature, design$df[[feature]], main$shap_feat)
+    tab <- active_shap_by_group(feature, design$df[[feature]], main$shap_feat, w = design$w)
     val <- tab$shap_active[tab$level == level]
     if (length(val) != 1L) stop("Level not found for main direction: ", paste0(feature, "=", level))
     return(as.numeric(val))
@@ -204,9 +205,9 @@
   onehot2 <- paste0(feature[2], level[2])
 
   if (is.null(seed)) {
-    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n)
+    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, w_full = design$w)
   } else {
-    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, seed = as.integer(seed))
+    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, seed = as.integer(seed), w_full = design$w)
   }
 
   feature_names <- design$feature_names
@@ -226,7 +227,12 @@
 
   active_idx <- which(X_sub[, ii] != 0 & X_sub[, jj] != 0)
   if (length(active_idx) == 0L) stop("No active rows for this level-pair in interaction subsample.")
-  mean(shap_int_feat[active_idx, ii, jj])
+  if (is.null(inter$w_sub)) {
+    mean(shap_int_feat[active_idx, ii, jj])
+  } else {
+    ww <- inter$w_sub[active_idx]
+    sum(shap_int_feat[active_idx, ii, jj] * ww) / sum(ww)
+  }
 }
 
 # --- exported: boot_strength --------------------------------------------------
