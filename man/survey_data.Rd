@@ -5,14 +5,27 @@
 \alias{survey_data}
 \title{Processed Survey Data for SHAP Demonstration}
 \format{
-A data frame with 60,000 rows and 6 variables:
+A data frame with 43,950 rows and 8 variables:
 \describe{
 \item{gun_control}{Numeric policy preference score (higher = more restrictive).}
 \item{gun_own}{Gun ownership status of household.}
 \item{partisan}{Partisan identification (Dem., Rep., Ind.).}
 \item{race}{Self-reported race.}
 \item{gender}{Gender identity (Men, Woman, Other).}
-\item{college}{College education status.}
+\item{educ}{Highest level of education completed: \cr
+\code{[1]} Did not graduate from high school; \cr
+\code{[2]} High school graduate; \cr
+\code{[3]} Some college, but no degree (yet); \cr
+\code{[4]} 2-year college degree; \cr
+\code{[5]} 4-year college degree; \cr
+\code{[6]} Postgraduate degree (MA, MBA, MD, JD, PhD, etc.).}
+\item{rucc}{Rural-Urban Continuum Code (RUCC), a USDA-developed 9-point county
+classification of urbanization and metro adjacency, ranging from 1 (most urban)
+to 9 (most rural).}
+\item{weight}{Survey weight constructed from \code{commonweight}.
+The survey codebook recommends the use of \code{commonweight} when researchers
+wish to characterize the opinions and behaviors of adult Americans.
+This variable incorporates that weighting scheme.}
 }
 }
 \source{
@@ -24,5 +37,10 @@ survey_data
 \description{
 A processed survey dataset used to demonstrate SHAP-based interpretation
 methods for survey models.
+}
+\details{
+The dataset is derived from publicly available survey data and then filtered to
+remove any rows with missing values (NA) across the included variables, resulting
+in 43,950 complete cases.
 }
 \keyword{datasets}
