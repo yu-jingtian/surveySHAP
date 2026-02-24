@@ -72,8 +72,12 @@ summarize_shap_rslt <- function(
   level_chr  <- as.character(dir_main$level)
 
   feature_chr <- rep(NA_character_, length(onehot_chr))
+  # Categorical variables: onehot == paste0(feature, level)
   ok <- !is.na(onehot_chr) & !is.na(level_chr) & endsWith(onehot_chr, level_chr)
   feature_chr[ok] <- substr(onehot_chr[ok], 1, nchar(onehot_chr[ok]) - nchar(level_chr[ok]))
+  # Numeric/ordinal variables: we store `onehot` as the feature name and `level` as NA
+  ok_num <- !is.na(onehot_chr) & is.na(level_chr)
+  feature_chr[ok_num] <- onehot_chr[ok_num]
 
   direction_main_complete <- dir_main[, c("level", "shap_active", "n"), drop = FALSE]
   direction_main_complete$feature <- feature_chr

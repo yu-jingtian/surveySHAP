@@ -106,8 +106,12 @@ active_shap_by_group <- function(group_prefix,
                                  group_factor,
                                  shap_feat_mat,
                                  w = NULL) {
-  stopifnot(is.factor(group_factor))
   stopifnot(is.matrix(shap_feat_mat), nrow(shap_feat_mat) == length(group_factor))
+
+  # This helper is defined for categorical (factor) groups only.
+  if (!is.factor(group_factor)) {
+    stop("`active_shap_by_group()` requires `group_factor` to be a factor.")
+  }
 
   if (!is.null(w)) {
     w <- as.numeric(w)
@@ -167,9 +171,23 @@ shap_direction_main_active <- function(df,
                                      x_cols = c("gun_own", "partisan", "race", "gender", "educ", "rucc"),
                                      w = NULL) {
   stopifnot(is.data.frame(df))
-  out <- do.call(
-    rbind,
-    lapply(x_cols, function(nm) active_shap_by_group(nm, df[[nm]], shap_feat, w = w))
-  )
-  out
+
+  # For numeric/ordinal covariates (e.g., educ, rucc when treated as numeric),
+  # the level-wise "active" direction is not defined. We return a single row
+  # with NA for `level`/`shap_active`.
+  out_list <- lapply(x_cols, function(nm) {
+    v <- df[[nm]]
+    if (is.factor(v)) {
+      active_shap_by_group(nm, v, shap_feat, w = w)
+    } else {
+      data.frame(
+        level = NA_character_,
+        shap_active = NA_real_,
+        n = NA_real_,
+        onehot = nm,
+        stringsAsFactors = FALSE
+      )
+    }
+  })
+  do.call(rbind, out_list)
 }

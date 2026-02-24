@@ -144,6 +144,15 @@ shap_direction_interaction_active <- function(shap_int_feat,
 
   df <- df[!is.na(df$group_i) & !is.na(df$group_j) & df$group_i != df$group_j, , drop = FALSE]
 
+  # For numeric/ordinal features represented by a single column (e.g., educ, rucc
+  # when treated as numeric), the "active-active" definition based on one-hot
+  # indicators is not meaningful. Exclude any interaction pairs that involve
+  # such continuous features.
+  cont_feats <- intersect(feature_names, c("educ", "rucc"))
+  if (length(cont_feats) > 0) {
+    df <- df[!(df$feat_i %in% cont_feats | df$feat_j %in% cont_feats), , drop = FALSE]
+  }
+
   active_mean <- numeric(nrow(df))
   n_active <- numeric(nrow(df))
 

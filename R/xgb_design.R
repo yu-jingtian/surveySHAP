@@ -16,7 +16,8 @@ full_dummy_contrasts <- function(f) {
 #' - outcome `gun_control` is a 0--6 count (sum of 6 binary items)
 #' - for XGBoost fitting, we model the implied proportion `gun_control / trials`
 #'   (default `trials = 6`) with a logistic link (`reg:logistic`)
-#' - covariates are treated as factors
+#' - covariates are treated as factors *except* `educ` and `rucc`, which are
+#'   ordinal and treated as numeric by default
 #' - rows with missing values are removed
 #' - one-hot encoding uses identity contrasts (no reference level dropped)
 #' - optional survey weights are carried through for weighted training and
@@ -74,9 +75,16 @@ build_xgb_design <- function(
   # outcome as numeric count
   df$y_count <- as.numeric(df$y_count)
 
-  # factorize covariates
-  for (nm in x_cols) {
+  # By default, treat ordinal covariates as numeric so the model can exploit ordering.
+  # Categorical covariates are one-hot encoded with full (identity) contrasts.
+  ordinal_numeric <- intersect(x_cols, c("educ", "rucc"))
+  factor_cols <- setdiff(x_cols, ordinal_numeric)
+
+  for (nm in factor_cols) {
     df[[nm]] <- as.factor(df[[nm]])
+  }
+  for (nm in ordinal_numeric) {
+    df[[nm]] <- as.numeric(df[[nm]])
   }
 
   # weights (optional)
@@ -87,7 +95,9 @@ build_xgb_design <- function(
 
   # complete cases + drop unused levels
   df <- df[stats::complete.cases(df), , drop = FALSE]
-  df <- droplevels(df)
+  if (length(factor_cols) > 0) {
+    df[factor_cols] <- lapply(df[factor_cols], droplevels)
+  }
 
   if (!is.null(weight_col)) {
     w <- as.numeric(df[[weight_col]])
@@ -99,9 +109,12 @@ build_xgb_design <- function(
     }
   }
 
-  # contrasts.arg: identity coding for each factor
-  contr_list <- lapply(x_cols, function(nm) full_dummy_contrasts(df[[nm]]))
-  names(contr_list) <- x_cols
+  # contrasts.arg: identity coding for each factor (numeric cols ignored)
+  contr_list <- NULL
+  if (length(factor_cols) > 0) {
+    contr_list <- lapply(factor_cols, function(nm) full_dummy_contrasts(df[[nm]]))
+    names(contr_list) <- factor_cols
+  }
 
   # one-hot sparse design matrix (no intercept, no dropped ref)
   fml <- stats::as.formula(paste("~", paste(x_cols, collapse = " + "), "- 1"))
