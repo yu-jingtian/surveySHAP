@@ -10,122 +10,102 @@ full_dummy_contrasts <- function(f) {
   stats::contrasts(f, contrasts = FALSE)
 }
 
-#' Build the XGBoost modeling frame and sparse design matrix
+#' Build the XGBoost modeling frame and sparse design matrix (binomial-style)
 #'
-#' Default behavior for the updated data structure:
-#' - outcome `gun_control` is a 0--6 count (sum of 6 binary items)
-#' - for XGBoost fitting, we model the implied proportion `gun_control / trials`
-#'   (default `trials = 6`) with a logistic link (`reg:logistic`)
-#' - covariates are treated as factors *except* `educ` and `rucc`, which are
-#'   ordinal and treated as numeric by default
-#' - rows with missing values are removed
-#' - one-hot encoding uses identity contrasts (no reference level dropped)
-#' - optional survey weights are carried through for weighted training and
-#'   weighted SHAP aggregation
+#' Outcome is a sum score 0--K (default K=6). We model the implied proportion
+#' y/K with a logistic objective; SHAP values are additive on the logit scale.
+#'
+#' Categorical predictors are one-hot encoded with identity contrasts (no dropped reference).
+#' Ordinal predictors (educ, rucc) are treated as numeric columns in the design matrix.
+#'
+#' Sample weights (if provided) are passed through and can be normalized to mean 1.
 #'
 #' @param data A data.frame containing outcome and covariates.
 #' @param y_col Outcome column name (default: "gun_control").
-#' @param x_cols Covariate column names.
-#'   Default: c("gun_own","partisan","race","gender","educ","rucc").
-#' @param weight_col Optional weight column name (default: "weight"). If NULL or
-#'   not present, weights are not used.
-#' @param outcome One of c("binom_prop","count"). If "binom_prop" (default),
-#'   the returned `y` is `gun_control / trials`. If "count", the returned `y` is
-#'   the raw count (0--trials).
-#' @param trials Integer number of trials for the summed index (default: 6).
-#' @param normalize_weights Logical; if TRUE (default) and weights are present,
-#'   weights are rescaled to have mean 1 (preserving relative weights).
-#' @return A list with:
-#'   - `df`: cleaned data.frame (includes covariates, outcome, and weights if present)
-#'   - `X`: dgCMatrix design matrix
-#'   - `y`: training label (depends on `outcome`)
-#'   - `y_count`: raw count outcome (0--trials)
-#'   - `trials`: integer trials
-#'   - `w`: normalized weights (or NULL)
-#'   - `feature_names`: character column names for `X`
+#' @param trials Integer number of trials K (default 6).
+#' @param cat_cols Categorical covariates to one-hot encode.
+#' @param num_cols Numeric covariates to keep as numeric columns.
+#' @param weight_col Optional weight column name (default: "weight"). If missing, weights are NULL.
+#' @param normalize_weights Logical; if TRUE, divide weights by mean(weights).
+#'
+#' @return A list with `df` (cleaned data), `X` (dgCMatrix), `y_count`, `y` (proportion),
+#'   `w` (weights or NULL), and `feature_names` (character).
 #' @export
 build_xgb_design <- function(
     data,
     y_col = "gun_control",
-    x_cols = c("gun_own", "partisan", "race", "gender", "educ", "rucc"),
-    weight_col = "weight",
-    outcome = c("binom_prop", "count"),
     trials = 6L,
+    cat_cols = c("gun_own", "partisan", "race", "gender"),
+    num_cols = c("educ", "rucc"),
+    weight_col = "weight",
     normalize_weights = TRUE
 ) {
   stopifnot(is.data.frame(data))
   stopifnot(is.character(y_col), length(y_col) == 1)
-  stopifnot(is.character(x_cols), length(x_cols) >= 1)
-  outcome <- match.arg(outcome)
   trials <- as.integer(trials)
-  if (trials <= 0L) stop("`trials` must be a positive integer.")
+  if (trials <= 0L) stop("`trials` must be positive.")
 
-  needed <- c(y_col, x_cols)
-  if (!is.null(weight_col)) needed <- c(needed, weight_col)
-  missing_cols <- setdiff(needed, names(data))
+  all_cols <- unique(c(y_col, cat_cols, num_cols, weight_col))
+  all_cols <- all_cols[all_cols %in% names(data)]
+  missing_cols <- setdiff(c(y_col, cat_cols, num_cols), names(data))
   if (length(missing_cols) > 0) {
     stop("Missing columns in `data`: ", paste(missing_cols, collapse = ", "))
   }
 
-  # Construct modeling df using base subsetting (package-safe)
-  keep <- c(y_col, x_cols, if (!is.null(weight_col)) weight_col)
-  df <- data[, keep, drop = FALSE]
+  df <- data[, all_cols, drop = FALSE]
   names(df)[names(df) == y_col] <- "y_count"
-
-  # outcome as numeric count
   df$y_count <- as.numeric(df$y_count)
-
-  # By default, treat ordinal covariates as numeric so the model can exploit ordering.
-  # Categorical covariates are one-hot encoded with full (identity) contrasts.
-  ordinal_numeric <- intersect(x_cols, c("educ", "rucc"))
-  factor_cols <- setdiff(x_cols, ordinal_numeric)
-
-  for (nm in factor_cols) {
-    df[[nm]] <- as.factor(df[[nm]])
-  }
-  for (nm in ordinal_numeric) {
-    df[[nm]] <- as.numeric(df[[nm]])
-  }
 
   # weights (optional)
   w <- NULL
-  if (!is.null(weight_col)) {
+  if (!is.null(weight_col) && weight_col %in% names(df)) {
     w <- as.numeric(df[[weight_col]])
   }
 
-  # complete cases + drop unused levels
-  df <- df[stats::complete.cases(df), , drop = FALSE]
-  if (length(factor_cols) > 0) {
-    df[factor_cols] <- lapply(df[factor_cols], droplevels)
+  # factorize categorical covariates
+  for (nm in cat_cols) {
+    df[[nm]] <- as.factor(df[[nm]])
   }
 
-  if (!is.null(weight_col)) {
+  # numeric covariates (leave numeric)
+  for (nm in num_cols) {
+    df[[nm]] <- as.numeric(df[[nm]])
+  }
+
+  # complete cases on outcome + predictors (+ weights if present)
+  cc_cols <- c("y_count", cat_cols, num_cols)
+  if (!is.null(w)) cc_cols <- c(cc_cols, weight_col)
+  df <- df[stats::complete.cases(df[, cc_cols, drop = FALSE]), , drop = FALSE]
+  df <- droplevels(df)
+
+  # align weights after filtering
+  if (!is.null(w)) {
     w <- as.numeric(df[[weight_col]])
-    if (any(!is.finite(w)) || any(w < 0)) stop("`weight_col` must be finite and nonnegative.")
-    if (isTRUE(normalize_weights)) {
-      m <- mean(w)
-      if (!is.finite(m) || m <= 0) stop("Invalid weights: mean(weight) must be > 0.")
-      w <- w / m
+    # drop non-positive weights
+    ok_w <- !is.na(w) & w > 0
+    df <- df[ok_w, , drop = FALSE]
+    w <- w[ok_w]
+    if (normalize_weights) {
+      w <- w / mean(w)
     }
   }
 
-  # contrasts.arg: identity coding for each factor (numeric cols ignored)
-  contr_list <- NULL
-  if (length(factor_cols) > 0) {
-    contr_list <- lapply(factor_cols, function(nm) full_dummy_contrasts(df[[nm]]))
-    names(contr_list) <- factor_cols
-  }
+  # y as proportion in [0,1]
+  y_count <- df$y_count
+  y <- y_count / trials
 
-  # one-hot sparse design matrix (no intercept, no dropped ref)
-  fml <- stats::as.formula(paste("~", paste(x_cols, collapse = " + "), "- 1"))
+  # contrasts.arg: identity coding for each factor
+  contr_list <- lapply(cat_cols, function(nm) full_dummy_contrasts(df[[nm]]))
+  names(contr_list) <- cat_cols
+
+  # build sparse design: include numeric columns directly
+  rhs <- c(cat_cols, num_cols)
+  fml <- stats::as.formula(paste("~", paste(rhs, collapse = " + "), "- 1"))
   X <- Matrix::sparse.model.matrix(
     fml,
     data = df,
     contrasts.arg = contr_list
   )
-
-  y_count <- df$y_count
-  y <- if (outcome == "binom_prop") y_count / trials else y_count
 
   if (nrow(X) != length(y)) stop("Row mismatch between X and y.")
   if (ncol(X) == 0) stop("Design matrix has 0 columns. Check factor levels / inputs.")
@@ -133,11 +113,10 @@ build_xgb_design <- function(
   list(
     df = df,
     X = X,
-    y = y,
     y_count = y_count,
-    trials = trials,
+    y = y,
     w = w,
-    feature_names = colnames(X),
-    outcome = outcome
+    trials = trials,
+    feature_names = colnames(X)
   )
 }

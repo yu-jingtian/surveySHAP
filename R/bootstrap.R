@@ -1,19 +1,15 @@
 ############################################################
-# Bootstrap utilities (targeted)
+# Bootstrap utilities (targeted; weight-aware)
 # - boot_strength(): bootstrap ONE strength target (main or interaction)
-# - boot_direction(): bootstrap ONE direction target (main or interaction level-pair)
+# - boot_direction(): bootstrap ONE direction target (main level or interaction level/stratum)
 #
-# Drop this whole file into R/ (e.g., R/bootstrap_targeted.R)
+# NOTE: For numeric variables (educ, rucc), "main direction by level" is undefined;
+# boot_direction(feature="educ", level=NA) returns NA.
+#
+# For interaction direction:
+# - categorical × categorical: require both levels (active-active rows)
+# - numeric × categorical: specify level=NA for numeric and level=<cat-level> for categorical
 ############################################################
-
-# NOTE:
-# These functions intentionally reuse your existing package internals:
-#   build_xgb_design(), fit_survey_xgb(), compute_shap_main(), compute_shap_interaction(),
-#   shap_strength_main_group(), shap_strength_interaction_group(), active_shap_by_group()
-#
-# They do NOT rely on your old "bootstrap everything then summarize" workflow.
-
-# --- internal helpers ---------------------------------------------------------
 
 .canon_pair <- function(feature, level = NULL) {
   stopifnot(is.character(feature), length(feature) %in% c(1L, 2L))
@@ -33,6 +29,24 @@
 
 .make_pair_label <- function(f1, f2) {
   if (f1 <= f2) paste0(f1, " × ", f2) else paste0(f2, " × ", f1)
+}
+
+.wmean <- function(x, w) {
+  x <- as.numeric(x)
+  w <- as.numeric(w)
+  ok <- !is.na(x) & !is.na(w) & w > 0
+  if (!any(ok)) return(NA_real_)
+  sum(w[ok] * x[ok]) / sum(w[ok])
+}
+
+.n_eff <- function(w) {
+  w <- as.numeric(w)
+  ok <- !is.na(w) & w > 0
+  if (!any(ok)) return(0)
+  sw <- sum(w[ok])
+  sw2 <- sum(w[ok]^2)
+  if (sw2 <= 0) return(0)
+  (sw^2) / sw2
 }
 
 .summarise_boot_scalar <- function(estimate, boot, conf = 0.95) {
@@ -70,10 +84,8 @@
   stopifnot(is.data.frame(data))
   B <- as.integer(B)
   if (B < 1L) stop("B must be >= 1")
-
   if (!is.null(seed)) seed <- as.integer(seed)
 
-  # deterministic per-replicate seeds
   if (is.null(seed)) {
     seeds <- sample.int(.Machine$integer.max, B)
   } else {
@@ -82,14 +94,12 @@
 
   n <- nrow(data)
 
-  # worker function
   one_rep <- function(b) {
     s <- seeds[b]
     set.seed(s)
     idx <- sample.int(n, n, replace = TRUE)
     dat_b <- data[idx, , drop = FALSE]
 
-    # run computation; fail -> NA
     out <- tryCatch(
       FUN_one(dat_b, seed = s),
       error = function(e) NA_real_
@@ -106,22 +116,17 @@
     cl <- parallel::makeCluster(n_cores)
     on.exit(parallel::stopCluster(cl), add = TRUE)
 
-    # Load packages needed on workers
     parallel::clusterEvalQ(cl, {
       suppressPackageStartupMessages({
-        library(surveySHAP)
         library(xgboost)
         library(Matrix)
       })
       NULL
     })
 
-    # Export symbols from current namespace/session.
-    # Assumes this file is part of the package namespace when running in-package.
     to_export <- unique(c(
-      # from this file
-      ".canon_pair", ".make_pair_label", ".summarise_boot_scalar", ".bootstrap_scalar",
-      # core pipeline functions you already have in your package
+      ".canon_pair", ".make_pair_label", ".wmean", ".n_eff",
+      ".summarise_boot_scalar", ".bootstrap_scalar",
       "build_xgb_design", "fit_survey_xgb",
       "compute_shap_main", "compute_shap_interaction",
       "shap_strength_main_group", "shap_strength_interaction_group",
@@ -145,7 +150,6 @@
 
   design <- build_xgb_design(data)
 
-  # fit
   if (is.null(seed)) {
     fit <- fit_survey_xgb(design$X, design$y, w = design$w)
   } else {
@@ -160,14 +164,13 @@
     return(as.numeric(val))
   }
 
-  # interaction strength
   if (is.null(seed)) {
-    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, w_full = design$w)
+    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, w = design$w)
   } else {
-    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, seed = as.integer(seed), w_full = design$w)
+    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, seed = as.integer(seed), w = design$w)
   }
 
-  df_int <- shap_strength_interaction_group(inter$shap_int_feat, design$feature_names, w = inter$w_sub)
+  df_int <- shap_strength_interaction_group(inter$shap_int_feat, design$feature_names, w_sub = inter$w_sub)
 
   pair_label <- .make_pair_label(feature[1], feature[2])
   val <- df_int$strength[df_int$pair == pair_label]
@@ -182,57 +185,70 @@
 
   design <- build_xgb_design(data)
 
-  # fit
   if (is.null(seed)) {
     fit <- fit_survey_xgb(design$X, design$y, w = design$w)
   } else {
     fit <- fit_survey_xgb(design$X, design$y, w = design$w, seed = as.integer(seed))
   }
 
-  # main shap always needed for main direction
-  if (length(feature) == 1L) {
-    main <- compute_shap_main(fit$model, fit$dall, feature_names = design$feature_names)
+  numeric_vars <- c("educ", "rucc")
 
-    # active_shap_by_group already returns mean by level
-    tab <- active_shap_by_group(feature, design$df[[feature]], main$shap_feat, w = design$w)
+  if (length(feature) == 1L) {
+    if (feature %in% numeric_vars) return(NA_real_)  # undefined
+    main <- compute_shap_main(fit$model, fit$dall, feature_names = design$feature_names)
+    tab <- active_shap_by_group(feature, as.factor(design$df[[feature]]), main$shap_feat, w = design$w, min_n_eff = 0)
     val <- tab$shap_active[tab$level == level]
     if (length(val) != 1L) stop("Level not found for main direction: ", paste0(feature, "=", level))
     return(as.numeric(val))
   }
 
-  # interaction direction for (feat1,level1) × (feat2,level2)
-  onehot1 <- paste0(feature[1], level[1])
-  onehot2 <- paste0(feature[2], level[2])
+  # interaction direction
+  f1 <- feature[1]; f2 <- feature[2]
+  l1 <- level[1];   l2 <- level[2]
 
   if (is.null(seed)) {
-    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, w_full = design$w)
+    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, w = design$w)
   } else {
-    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, seed = as.integer(seed), w_full = design$w)
+    inter <- compute_shap_interaction(fit$model, design$X, subsample_n = interaction_subsample_n, seed = as.integer(seed), w = design$w)
   }
 
   feature_names <- design$feature_names
-  ii <- match(onehot1, feature_names)
-  jj <- match(onehot2, feature_names)
-  if (is.na(ii) || is.na(jj)) {
-    stop("One-hot not found in design matrix: ",
-         paste0(onehot1, if (is.na(ii)) " (missing)" else ""),
-         " ; ",
-         paste0(onehot2, if (is.na(jj)) " (missing)" else ""))
-  }
-
-  # shap_int_feat is m x p x p with p = length(feature_names)
-  # X_sub is m x p used for predinteraction
   X_sub <- inter$X_sub
   shap_int_feat <- inter$shap_int_feat
+  ww <- if (is.null(inter$w_sub)) rep(1, nrow(X_sub)) else as.numeric(inter$w_sub)
 
-  active_idx <- which(X_sub[, ii] != 0 & X_sub[, jj] != 0)
-  if (length(active_idx) == 0L) stop("No active rows for this level-pair in interaction subsample.")
-  if (is.null(inter$w_sub)) {
-    mean(shap_int_feat[active_idx, ii, jj])
-  } else {
-    ww <- inter$w_sub[active_idx]
-    sum(shap_int_feat[active_idx, ii, jj] * ww) / sum(ww)
+  f1_num <- f1 %in% numeric_vars
+  f2_num <- f2 %in% numeric_vars
+
+  # indices
+  ii <- match(if (f1_num) f1 else paste0(f1, l1), feature_names)
+  jj <- match(if (f2_num) f2 else paste0(f2, l2), feature_names)
+
+  if (is.na(ii) || is.na(jj)) stop("Feature columns not found in design matrix.")
+
+  if (!f1_num && !f2_num) {
+    idx <- which(X_sub[, ii] != 0 & X_sub[, jj] != 0)
+    if (length(idx) == 0L) stop("No co-active rows for this level-pair in interaction subsample.")
+    return(.wmean(shap_int_feat[idx, ii, jj], ww[idx]))
   }
+
+  if (f1_num && f2_num) {
+    return(.wmean(shap_int_feat[, ii, jj], ww))
+  }
+
+  # one numeric, one categorical: subset where the categorical one-hot is active
+  if (f1_num && !f2_num) {
+    idx <- which(X_sub[, jj] != 0)
+    if (length(idx) == 0L) stop("No active rows for categorical level in interaction subsample.")
+    return(.wmean(shap_int_feat[idx, ii, jj], ww[idx]))
+  }
+  if (!f1_num && f2_num) {
+    idx <- which(X_sub[, ii] != 0)
+    if (length(idx) == 0L) stop("No active rows for categorical level in interaction subsample.")
+    return(.wmean(shap_int_feat[idx, ii, jj], ww[idx]))
+  }
+
+  NA_real_
 }
 
 # --- exported: boot_strength --------------------------------------------------
@@ -263,7 +279,6 @@ boot_strength <- function(data,
   canon <- .canon_pair(feature)
   feature <- canon$feature
 
-  # baseline estimate (non-bootstrap)
   estimate <- .compute_strength_target(
     data = data,
     feature = feature,
@@ -271,7 +286,6 @@ boot_strength <- function(data,
     seed = seed
   )
 
-  # bootstrap
   FUN_one <- function(dat_b, seed) {
     .compute_strength_target(
       data = dat_b,
@@ -308,15 +322,17 @@ boot_strength <- function(data,
 
 # --- exported: boot_direction -------------------------------------------------
 
-#' Bootstrap a single SHAP direction target (active SHAP)
+#' Bootstrap a single SHAP direction target (active SHAP / interaction SHAP)
 #'
-#' Main: direction(feature="partisan", level="Dem.") = mean active SHAP for that level.
-#' Interaction: direction((feat1,level1) × (feat2,level2)) = mean interaction SHAP among rows
-#' where BOTH one-hot indicators are active in the interaction subsample.
+#' Main (categorical): direction(feature="partisan", level="Dem.") = weighted mean active SHAP for that level.
+#' Main (numeric): returns NA.
+#'
+#' Interaction (categorical × categorical): weighted mean interaction SHAP among rows where BOTH one-hot indicators are active.
+#' Interaction (numeric × categorical): specify level=NA for numeric and level=<cat-level> for categorical; computes mean among rows where the categorical one-hot is active.
 #'
 #' @param data Input data.frame.
 #' @param feature Character vector length 1 or 2.
-#' @param level Character vector length 1 or 2 (must match feature length).
+#' @param level Character vector length 1 or 2 (must match feature length; may contain NA for numeric features).
 #' @param B Number of bootstrap replicates.
 #' @param conf CI level for percentile CI (default 0.95).
 #' @param seed Optional integer seed for reproducibility.
@@ -336,9 +352,9 @@ boot_direction <- function(data,
                            interaction_subsample_n = 5000L) {
   stopifnot(is.data.frame(data))
   stopifnot(is.character(feature), length(feature) %in% c(1L, 2L))
-  stopifnot(is.character(level), length(level) == length(feature))
+  stopifnot(length(level) == length(feature))
 
-  canon <- .canon_pair(feature, level)
+  canon <- .canon_pair(feature, as.character(level))
   feature <- canon$feature
   level <- canon$level
 
@@ -370,15 +386,9 @@ boot_direction <- function(data,
   )
 
   target <- if (length(feature) == 1L) {
-    list(type = "direction_main", feature = feature, level = level, onehot = paste0(feature, level))
+    list(type = "direction_main", feature = feature, level = level)
   } else {
-    list(
-      type = "direction_interaction",
-      feature = feature,
-      level = level,
-      onehot = c(paste0(feature[1], level[1]), paste0(feature[2], level[2])),
-      pair = .make_pair_label(feature[1], feature[2])
-    )
+    list(type = "direction_interaction", feature = feature, level = level, pair = .make_pair_label(feature[1], feature[2]))
   }
 
   list(
