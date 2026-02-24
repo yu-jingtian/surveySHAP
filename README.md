@@ -71,19 +71,26 @@ str(survey_data)
 
 ### Dataset overview
 
-- **Rows:** 43,950 respondents (complete cases after removing NA)
+## Dataset Description
+
+- **Rows:** 43,950 respondents (complete cases)
 - **Variables:**
-  - `gun_control` – numeric policy preference score  
-    (higher values indicate more restrictive / prohibitive positions)
+
+  - `gun_control` – count of restrictive gun policy responses (0–6). Larger values indicate more restrictive policy preferences.
+
   - `gun_own` – household gun ownership status
-  - `partisan` – partisan identification (Dem., Rep., Ind.)
+
+  - `partisan` – partisan identification (Democrat, Republican, Independent)
+
   - `race` – self-reported race
+
   - `gender` – gender identity
-  - `educ` – highest level of education completed  
-    (1 = Did not graduate HS; 2 = HS graduate;  
-    3 = Some college; 4 = 2-year degree;  
-    5 = 4-year degree; 6 = Postgraduate degree)
-  - `rucc` – Rural–Urban Continuum Code (1 = most urban, 9 = most rural)
+
+  - `educ` – highest level of education completed
+
+  - `rucc` – Rural–Urban Continuum Code  
+    (1 = most urban, 9 = most rural)
+
   - `weight` – survey weight constructed from `commonweight`,  
     recommended for characterizing opinions and behaviors of adult Americans
 
