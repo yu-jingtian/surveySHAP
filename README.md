@@ -241,7 +241,7 @@ summarize_shap_rslt(
 ## Two-way Direction — TOP (Positive)
 
 | group_i | level_i | group_j | level_j | direction | n_raw | w_sum | n_eff |
-|---------|---------|----------|-----------|-------|--------|--------|
+|---------|---------|----------|-----------|-------|--------|--------|--------|
 | partisan | Rep. | gender | Woman | 0.03421657 | 750 | 831.1541 | 449.0228 |
 | partisan | Dem. | race | White | 0.03194428 | 1478 | 1138.4415 | 855.1395 |
 | partisan | Rep. | college | Non-college | 0.02559270 | 813 | 925.5654 | 384.5527 |
