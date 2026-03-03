@@ -145,9 +145,14 @@ active_shap_by_group <- function(
 
   # model.matrix uses make.names() on factor levels when forming column names
   lev_chr <- as.character(group_factor)
-  col_for_row <- make.names(paste0(group_prefix, lev_chr))
+  cand_raw  <- paste0(group_prefix, lev_chr)
+  cand_mk   <- make.names(cand_raw)
 
-  idx <- match(col_for_row, colnames(shap_feat_mat))
+  idx_raw <- match(cand_raw, colnames(shap_feat_mat))
+  idx_mk  <- match(cand_mk,  colnames(shap_feat_mat))
+
+  idx <- idx_raw
+  idx[is.na(idx)] <- idx_mk[is.na(idx)]
   out <- rep(NA_real_, length(lev_chr))
   ok <- !is.na(idx)
   out[ok] <- shap_feat_mat[cbind(which(ok), idx[ok])]
