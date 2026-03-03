@@ -7,14 +7,14 @@
 feature_to_group(
   feature_names,
   groups = c(gun_own = "^gun_own", partisan = "^partisan", race = "^race", gender =
-    "^gender", college = "^college")
+    "^gender", college = "^college", metro = "^metro")
 )
 }
 \arguments{
 \item{feature_names}{Character vector of one-hot feature names.}
 
 \item{groups}{Named character vector mapping regex/prefix to group name.
-Default matches your script: gun_own, partisan, race, gender, college.}
+Default matches your script: gun_own, partisan, race, gender, college, metro.}
 }
 \value{
 Character vector of group labels (same length as feature_names).

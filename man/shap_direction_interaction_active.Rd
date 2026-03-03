@@ -8,7 +8,9 @@ shap_direction_interaction_active(
   shap_int_feat,
   X_sub,
   feature_names,
-  feat_group = NULL
+  feat_group = NULL,
+  w_sub = NULL,
+  min_n_eff = 100
 )
 }
 \arguments{
@@ -16,14 +18,20 @@ shap_direction_interaction_active(
 
 \item{X_sub}{The feature matrix used to compute \code{shap_int_feat} (m x p).}
 
-\item{feature_names}{One-hot feature names (length p).}
+\item{feature_names}{Feature names (length p).}
 
 \item{feat_group}{Group labels (length p); if NULL computed by \code{feature_to_group()}.}
+
+\item{w_sub}{Optional weights for the interaction subsample (length m).}
+
+\item{min_n_eff}{Minimum ESS for keeping a direction row (default 100).}
 }
 \value{
-A data.frame with columns feat_i, feat_j, direction_active, n_active, group_i, group_j.
+A data.frame with interaction direction rows and ESS diagnostics.
 }
 \description{
-For each one-hot pair (i, j), averages the interaction SHAP among rows where
-BOTH one-hot indicators are active (non-zero). Excludes within-factor pairs.
+For each one-hot pair (i, j) from different variable groups, averages the
+interaction SHAP among rows where BOTH one-hot indicators are active
+(non-zero). Filtering uses effective sample size (ESS) on the subset used
+for the mean.
 }

@@ -7,8 +7,9 @@
 fit_survey_xgb(
   X,
   y,
-  params = list(objective = "reg:squarederror", max_depth = 4, eta = 0.05, subsample =
-    0.8, colsample_bytree = 0.8),
+  w = NULL,
+  params = list(objective = "reg:squarederror", eval_metric = "rmse", max_depth = 4,
+    eta = 0.05, subsample = 0.8, colsample_bytree = 0.8),
   nrounds = 200,
   seed = NULL,
   verbose = 0
@@ -17,7 +18,9 @@ fit_survey_xgb(
 \arguments{
 \item{X}{A sparse matrix (\code{dgCMatrix}) of features.}
 
-\item{y}{Numeric outcome vector.}
+\item{y}{Numeric outcome vector (e.g., 0\u20136).}
+
+\item{w}{Optional sample weights (length(y)).}
 
 \item{params}{XGBoost parameter list. If \code{params$seed} is not provided and
 \code{seed} is not \code{NULL}, the function sets \code{params$seed = seed}.}
@@ -33,5 +36,7 @@ A list with \code{model} (\code{xgb.Booster}) and \code{dall} (\code{xgb.DMatrix
 For backward/forward compatibility, \code{dtrain} is also returned as an alias of \code{dall}.
 }
 \description{
-Fit an XGBoost regression model for survey outcome
+Fits an XGBoost regression model for the numeric survey outcome.
+In this package's default setup, the outcome is the sum score
+\code{gun_control \in \{0,1,\u2026,6\}}.
 }

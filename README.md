@@ -86,10 +86,13 @@ str(survey_data)
 
   - `gender` – gender identity
 
-  - `educ` – highest level of education completed
+  - `educ` – highest level of education completed (used to derive `college`)
 
-  - `rucc` – Rural–Urban Continuum Code  
-    (1 = most urban, 9 = most rural)
+  - `rucc` – Rural–Urban Continuum Code (1 = most urban, 9 = most rural; used to derive `metro`)
+
+  - `college` – discretized education (Non-college vs College)
+
+  - `metro` – discretized RUCC (Big-metro for rucc==1 vs Non-metro)
 
   - `weight` – survey weight constructed from `commonweight`,  
     recommended for characterizing opinions and behaviors of adult Americans
@@ -109,14 +112,14 @@ shap_rslt <- run_survey_shap(survey_data)
 
 **Notes (updated outcome + weights):**
 
-- The outcome `gun_control` is a 0–6 index (sum of 6 binary items). The default XGBoost fit models the implied proportion `gun_control/6` with a logistic link (`objective = "reg:logistic"`).
+- The outcome `gun_control` is a 0–6 index (sum of 6 binary items). The default XGBoost fit treats it as a numeric response and fits a regression model (`objective = "reg:squarederror"`).
 - SHAP values are therefore additive on the **logit scale** of the implied proportion. Positive SHAP values increase the predicted restrictiveness propensity; negative values decrease it.
 - If the `weight` column is present, the model is trained with sample weights and all SHAP summaries (strength/direction) use weighted averages.
 
 
 This function:
 1. Builds a full one-hot encoded sparse design matrix (no dropped reference levels)
-2. Fits an XGBoost model for the implied proportion (gun_control/6) with a logistic link (binomial-style)
+2. Fits an XGBoost regression model for the numeric outcome `gun_control`
 3. Computes main-effect SHAP values
 4. Computes interaction SHAP values on a subsample
 5. Aggregates results to interpretable group-level summaries
@@ -176,9 +179,9 @@ summarize_shap_rslt(
 | partisan  | 0.84987567 |
 | gun_own   | 0.43122453 |
 | gender    | 0.17313049 |
-| educ      | 0.10829549 |
+| college   | 0.10829549 |
 | race      | 0.07421247 |
-| rucc      | 0.05741971 |
+| metro     | 0.05741971 |
 
 ---
 
@@ -188,19 +191,19 @@ summarize_shap_rslt(
 |-----------------------|----------|
 | partisan × race       | 0.072899047 |
 | gun_own × partisan    | 0.068988099 |
-| educ × partisan       | 0.052832490 |
+| college × partisan    | 0.052832490 |
 | gender × partisan     | 0.032175076 |
-| educ × gun_own        | 0.022038511 |
+| college × gun_own     | 0.022038511 |
 | gun_own × race        | 0.020869160 |
 | gender × gun_own      | 0.019158194 |
-| gun_own × rucc        | 0.014098921 |
-| partisan × rucc       | 0.012298455 |
-| educ × race           | 0.012242074 |
+| gun_own × metro       | 0.014098921 |
+| partisan × metro      | 0.012298455 |
+| college × race        | 0.012242074 |
 | gender × race         | 0.009599948 |
-| educ × rucc           | 0.008895476 |
-| educ × gender         | 0.008476799 |
-| race × rucc           | 0.006388356 |
-| gender × rucc         | 0.005614561 |
+| college × metro       | 0.008895476 |
+| college × gender      | 0.008476799 |
+| race × metro          | 0.006388356 |
+| gender × metro        | 0.005614561 |
 
 ---
 

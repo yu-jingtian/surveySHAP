@@ -58,8 +58,8 @@ feature_to_group <- function(
       partisan = "^partisan",
       race     = "^race",
       gender   = "^gender",
-      educ     = "^educ$",
-      rucc     = "^rucc$"
+      college  = "^college",
+      metro    = "^metro"
     )
 ) {
   out <- rep(NA_character_, length(feature_names))
@@ -143,8 +143,9 @@ active_shap_by_group <- function(
     stop("Found <2 one-hot columns for group_prefix=", group_prefix)
   }
 
+  # model.matrix uses make.names() on factor levels when forming column names
   lev_chr <- as.character(group_factor)
-  col_for_row <- paste0(group_prefix, lev_chr)
+  col_for_row <- make.names(paste0(group_prefix, lev_chr))
 
   idx <- match(col_for_row, colnames(shap_feat_mat))
   out <- rep(NA_real_, length(lev_chr))
@@ -181,7 +182,7 @@ active_shap_by_group <- function(
       n_raw = n_raw,
       w_sum = w_sum,
       n_eff = n_eff,
-      onehot = paste0(group_prefix, lv),
+      onehot = make.names(paste0(group_prefix, lv)),
       stringsAsFactors = FALSE
     )
   })
@@ -196,13 +197,11 @@ active_shap_by_group <- function(
 #' Main SHAP direction across all variables (active SHAP; weighted)
 #'
 #' For categorical variables, returns level-wise active SHAP summaries.
-#' For numeric variables (e.g., educ, rucc), returns a single row with level=NA and shap_active=NA.
 #'
-#' @param df Cleaned modeling dataframe returned by `build_xgb_design()` (contains factor cols + numeric cols).
+#' @param df Cleaned modeling dataframe returned by `build_xgb_design()` (contains factor cols).
 #' @param shap_feat n x p SHAP matrix excluding bias.
 #' @param w Optional sample weights (length n).
-#' @param cat_cols Categorical variables to compute active SHAP (default: gun_own, partisan, race, gender).
-#' @param num_cols Numeric variables to include with NA direction (default: educ, rucc).
+#' @param cat_cols Categorical variables to compute active SHAP.
 #' @param min_n_eff Minimum effective sample size filter for categorical levels.
 #' @return A data.frame stacking all variables' direction summaries.
 #' @export
@@ -210,8 +209,7 @@ shap_direction_main_active <- function(
     df,
     shap_feat,
     w = NULL,
-    cat_cols = c("gun_own", "partisan", "race", "gender"),
-    num_cols = c("educ", "rucc"),
+    cat_cols = c("gun_own", "partisan", "race", "gender", "college", "metro"),
     min_n_eff = 100
 ) {
   stopifnot(is.data.frame(df))
@@ -226,25 +224,7 @@ shap_direction_main_active <- function(
     })
   )
 
-  # numeric vars: include placeholder rows (direction not level-defined)
-  out_num <- do.call(
-    rbind,
-    lapply(num_cols, function(nm) {
-      if (!nm %in% names(df)) return(NULL)
-      data.frame(
-        feature = nm,
-        level = NA_character_,
-        shap_active = NA_real_,
-        n_raw = nrow(df),
-        w_sum = if (is.null(w)) nrow(df) else sum(w, na.rm = TRUE),
-        n_eff = if (is.null(w)) nrow(df) else .n_eff(w),
-        onehot = NA_character_,
-        stringsAsFactors = FALSE
-      )
-    })
-  )
-
-  out <- rbind(out_cat, out_num)
+  out <- out_cat
   rownames(out) <- NULL
   out
 }

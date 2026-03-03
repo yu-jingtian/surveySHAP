@@ -3,12 +3,9 @@
 # - boot_strength(): bootstrap ONE strength target (main or interaction)
 # - boot_direction(): bootstrap ONE direction target (main level or interaction level/stratum)
 #
-# NOTE: For numeric variables (educ, rucc), "main direction by level" is undefined;
-# boot_direction(feature="educ", level=NA) returns NA.
-#
-# For interaction direction:
-# - categorical × categorical: require both levels (active-active rows)
-# - numeric × categorical: specify level=NA for numeric and level=<cat-level> for categorical
+# NOTE: In the current setup, all modeled covariates are categorical
+# (including discretized college/metro). Direction targets are therefore
+# always defined by (feature, level) pairs.
 ############################################################
 
 .canon_pair <- function(feature, level = NULL) {
@@ -191,7 +188,7 @@
     fit <- fit_survey_xgb(design$X, design$y, w = design$w, seed = as.integer(seed))
   }
 
-  numeric_vars <- c("educ", "rucc")
+  numeric_vars <- character(0)
 
   if (length(feature) == 1L) {
     if (feature %in% numeric_vars) return(NA_real_)  # undefined
@@ -221,8 +218,8 @@
   f2_num <- f2 %in% numeric_vars
 
   # indices
-  ii <- match(if (f1_num) f1 else paste0(f1, l1), feature_names)
-  jj <- match(if (f2_num) f2 else paste0(f2, l2), feature_names)
+  ii <- match(if (f1_num) f1 else make.names(paste0(f1, l1)), feature_names)
+  jj <- match(if (f2_num) f2 else make.names(paste0(f2, l2)), feature_names)
 
   if (is.na(ii) || is.na(jj)) stop("Feature columns not found in design matrix.")
 

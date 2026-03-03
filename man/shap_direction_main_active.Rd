@@ -2,12 +2,14 @@
 % Please edit documentation in R/shap_main.R
 \name{shap_direction_main_active}
 \alias{shap_direction_main_active}
-\title{Main SHAP direction across all variables (active SHAP)}
+\title{Main SHAP direction across all variables (active SHAP; weighted)}
 \usage{
 shap_direction_main_active(
   df,
   shap_feat,
-  x_cols = c("gun_own", "partisan", "race", "gender", "college")
+  w = NULL,
+  cat_cols = c("gun_own", "partisan", "race", "gender", "college", "metro"),
+  min_n_eff = 100
 )
 }
 \arguments{
@@ -15,11 +17,17 @@ shap_direction_main_active(
 
 \item{shap_feat}{n x p SHAP matrix excluding bias.}
 
-\item{x_cols}{Covariate column names used in design.}
+\item{w}{Optional sample weights (length n).}
+
+\item{cat_cols}{Categorical variables to compute active SHAP.}
+
+\item{min_n_eff}{Minimum effective sample size filter for categorical levels.}
 }
 \value{
-A data.frame stacking all variables' active SHAP direction summaries.
+A data.frame stacking all variables' direction summaries.
 }
 \description{
-Main SHAP direction across all variables (active SHAP)
+For each observation, selects the SHAP value of the one-hot column that matches
+its observed level ("active SHAP"). Then aggregates by level using a (weighted)
+mean, filtering out levels with ESS below \code{min_n_eff}.
 }

@@ -154,9 +154,9 @@ shap_direction_interaction_active <- function(
   }
 
   # determine which features are "one-hot" vs "numeric single-column"
-  # heuristic: numeric features have exact name equal to their group (educ, rucc);
-  # one-hot features start with group prefix.
-  is_numeric_feat <- !is.na(feat_group) & feature_names == feat_group
+  # In the current setup, all modeled covariates are treated as categorical
+  # (including discretized college/metro), so all features are one-hot.
+  is_numeric_feat <- rep(FALSE, p)
 
   pairs <- which(upper.tri(matrix(1, p, p)), arr.ind = TRUE)
 
@@ -190,6 +190,10 @@ shap_direction_interaction_active <- function(
       )
     }
 
+    unsanitize_level <- function(group, s) {
+      if (group %in% c("college", "metro")) gsub("\\\\.", "-", s) else s
+    }
+
     if (!i_num && !j_num) {
       # one-hot × one-hot: co-active rows
       idx <- which(X_sub[, ii] != 0 & X_sub[, jj] != 0)
@@ -200,8 +204,8 @@ shap_direction_interaction_active <- function(
           type = "cat×cat",
           feat_i = fi, feat_j = fj,
           group_i = gi, group_j = gj,
-          level_i = sub(paste0("^", gi), "", fi),
-          level_j = sub(paste0("^", gj), "", fj),
+          level_i = unsanitize_level(gi, sub(paste0("^", gi), "", fi)),
+          level_j = unsanitize_level(gj, sub(paste0("^", gj), "", fj)),
           direction = s$mean,
           n_raw = s$n_raw,
           w_sum = s$w_sum,

@@ -10,44 +10,55 @@ full_dummy_contrasts <- function(f) {
   stats::contrasts(f, contrasts = FALSE)
 }
 
-#' Build the XGBoost modeling frame and sparse design matrix (binomial-style)
+#' Build the XGBoost modeling frame and sparse design matrix
 #'
-#' Outcome is a sum score 0--K (default K=6). We model the implied proportion
-#' y/K with a logistic objective; SHAP values are additive on the logit scale.
+#' Outcome is the numeric sum score \code{0,1,\u2026,6} (default: \code{gun_control}).
 #'
 #' Categorical predictors are one-hot encoded with identity contrasts (no dropped reference).
-#' Ordinal predictors (educ, rucc) are treated as numeric columns in the design matrix.
+#' Education and RUCC are discretized into two binary factors and used in the model:
+#' \code{college \in \{Non-college, College\}} and \code{metro \in \{Big-metro, Non-metro\}}.
 #'
 #' Sample weights (if provided) are passed through and can be normalized to mean 1.
 #'
 #' @param data A data.frame containing outcome and covariates.
 #' @param y_col Outcome column name (default: "gun_control").
-#' @param trials Integer number of trials K (default 6).
 #' @param cat_cols Categorical covariates to one-hot encode.
-#' @param num_cols Numeric covariates to keep as numeric columns.
 #' @param weight_col Optional weight column name (default: "weight"). If missing, weights are NULL.
 #' @param normalize_weights Logical; if TRUE, divide weights by mean(weights).
 #'
-#' @return A list with `df` (cleaned data), `X` (dgCMatrix), `y_count`, `y` (proportion),
+#' @return A list with `df` (cleaned data), `X` (dgCMatrix), `y` (numeric),
 #'   `w` (weights or NULL), and `feature_names` (character).
 #' @export
 build_xgb_design <- function(
     data,
     y_col = "gun_control",
-    trials = 6L,
-    cat_cols = c("gun_own", "partisan", "race", "gender"),
-    num_cols = c("educ", "rucc"),
+    cat_cols = c("gun_own", "partisan", "race", "gender", "college", "metro"),
     weight_col = "weight",
     normalize_weights = TRUE
 ) {
   stopifnot(is.data.frame(data))
   stopifnot(is.character(y_col), length(y_col) == 1)
-  trials <- as.integer(trials)
-  if (trials <= 0L) stop("`trials` must be positive.")
 
-  all_cols <- unique(c(y_col, cat_cols, num_cols, weight_col))
+  # ---------- discretize educ/rucc and use them in the model ----------
+  if (!"college" %in% names(data)) {
+    if (!"educ" %in% names(data)) stop("Missing column in `data`: educ (needed to build `college`).")
+    data$college <- factor(
+      ifelse(data$educ %in% c(1, 2, 3), "Non-college",
+             ifelse(data$educ %in% c(4, 5, 6), "College", NA)),
+      levels = c("Non-college", "College")
+    )
+  }
+  if (!"metro" %in% names(data)) {
+    if (!"rucc" %in% names(data)) stop("Missing column in `data`: rucc (needed to build `metro`).")
+    data$metro <- factor(
+      ifelse(data$rucc == 1, "Big-metro", "Non-metro"),
+      levels = c("Big-metro", "Non-metro")
+    )
+  }
+
+  all_cols <- unique(c(y_col, cat_cols, weight_col))
   all_cols <- all_cols[all_cols %in% names(data)]
-  missing_cols <- setdiff(c(y_col, cat_cols, num_cols), names(data))
+  missing_cols <- setdiff(c(y_col, cat_cols), names(data))
   if (length(missing_cols) > 0) {
     stop("Missing columns in `data`: ", paste(missing_cols, collapse = ", "))
   }
@@ -67,13 +78,8 @@ build_xgb_design <- function(
     df[[nm]] <- as.factor(df[[nm]])
   }
 
-  # numeric covariates (leave numeric)
-  for (nm in num_cols) {
-    df[[nm]] <- as.numeric(df[[nm]])
-  }
-
   # complete cases on outcome + predictors (+ weights if present)
-  cc_cols <- c("y_count", cat_cols, num_cols)
+  cc_cols <- c("y_count", cat_cols)
   if (!is.null(w)) cc_cols <- c(cc_cols, weight_col)
   df <- df[stats::complete.cases(df[, cc_cols, drop = FALSE]), , drop = FALSE]
   df <- droplevels(df)
@@ -90,16 +96,15 @@ build_xgb_design <- function(
     }
   }
 
-  # y as proportion in [0,1]
-  y_count <- df$y_count
-  y <- y_count / trials
+  # y as numeric (0..6)
+  y <- df$y_count
 
   # contrasts.arg: identity coding for each factor
   contr_list <- lapply(cat_cols, function(nm) full_dummy_contrasts(df[[nm]]))
   names(contr_list) <- cat_cols
 
   # build sparse design: include numeric columns directly
-  rhs <- c(cat_cols, num_cols)
+  rhs <- c(cat_cols)
   fml <- stats::as.formula(paste("~", paste(rhs, collapse = " + "), "- 1"))
   X <- Matrix::sparse.model.matrix(
     fml,
@@ -113,10 +118,8 @@ build_xgb_design <- function(
   list(
     df = df,
     X = X,
-    y_count = y_count,
     y = y,
     w = w,
-    trials = trials,
     feature_names = colnames(X)
   )
 }

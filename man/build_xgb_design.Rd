@@ -7,7 +7,9 @@
 build_xgb_design(
   data,
   y_col = "gun_control",
-  x_cols = c("gun_own", "partisan", "race", "gender", "college")
+  cat_cols = c("gun_own", "partisan", "race", "gender", "college", "metro"),
+  weight_col = "weight",
+  normalize_weights = TRUE
 )
 }
 \arguments{
@@ -15,18 +17,20 @@ build_xgb_design(
 
 \item{y_col}{Outcome column name (default: "gun_control").}
 
-\item{x_cols}{Covariate column names (default: c("gun_own","partisan","race","gender","college")).}
+\item{cat_cols}{Categorical covariates to one-hot encode.}
+
+\item{weight_col}{Optional weight column name (default: "weight"). If missing, weights are NULL.}
+
+\item{normalize_weights}{Logical; if TRUE, divide weights by mean(weights).}
 }
 \value{
 A list with \code{df} (cleaned data), \code{X} (dgCMatrix), \code{y} (numeric),
-and \code{feature_names} (character).
+\code{w} (weights or NULL), and \code{feature_names} (character).
 }
 \description{
-Mirrors the analysis script:
-\itemize{
-\item outcome \code{gun_control} is numeric
-\item covariates are treated as factors
-\item rows with missing values are removed
-\item one-hot encoding uses identity contrasts (no reference level dropped)
-}
+Outcome is the numeric sum score \code{0,1,\u2026,6} (default: \code{gun_control}).
+
+Categorical predictors are one-hot encoded with identity contrasts (no dropped reference).
+Education and RUCC are discretized into two binary factors and used in the model:
+\code{college \in \{Non-college, College\}} and \code{metro \in \{Big-metro, Non-metro\}}.
 }
