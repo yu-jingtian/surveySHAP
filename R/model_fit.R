@@ -35,7 +35,7 @@ fit_survey_model <- function(design,
       x = X,
       y = design$y_prop,
       weights = if (is.null(w)) rep(6, nrow(X)) else 6 * w,
-      family = stats::binomial()
+      family = stats::quasibinomial()
     )
     fit$coefficients[is.na(fit$coefficients)] <- 0
     return(list(model_type = model, fit = fit, design = design))
