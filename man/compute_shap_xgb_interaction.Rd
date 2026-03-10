@@ -10,9 +10,13 @@ compute_shap_xgb_interaction(fit_obj)
 \item{fit_obj}{A fitted xgboost object from \code{\link[=fit_survey_model]{fit_survey_model()}}.}
 }
 \value{
-A list with an interaction array and feature names.
+A list with an interaction array, feature names, and scale label.
 }
 \description{
-Uses xgboost native interaction SHAP. The returned object keeps only
-feature-by-feature interactions and excludes the bias dimension.
+Uses xgboost native TreeSHAP interaction values. The returned array contains
+only feature-by-feature interactions and excludes the bias dimension.
+}
+\details{
+xgboost is fit only on the main one-hot feature matrix, so this interaction
+array is over the original level indicators, matching the original repo logic.
 }

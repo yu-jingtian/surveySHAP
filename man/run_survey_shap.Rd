@@ -8,38 +8,48 @@ run_survey_shap(
   data,
   model = c("lm", "glm", "xgb_numeric", "xgb_logistic"),
   output_dir = NULL,
-  seed = NULL,
-  min_n_eff_main = 100,
-  min_n_eff_interaction = 100,
+  y_col = "gun_control",
+  weight_col = "weight",
+  group_vars = .default_groups(),
+  normalize_weights = TRUE,
   xgb_params = NULL,
   nrounds = 200,
-  verbose = 0
+  seed = NULL,
+  verbose = 0,
+  min_n_eff = 100
 )
 }
 \arguments{
-\item{data}{Input data.frame.}
+\item{data}{A data.frame containing the survey data.}
 
-\item{model}{One of \code{"lm"}, \code{"glm"}, \code{"xgb_numeric"}, or
-\code{"xgb_logistic"}.}
+\item{model}{One of \code{"lm"}, \code{"glm"}, \code{"xgb_numeric"},
+or \code{"xgb_logistic"}.}
 
-\item{output_dir}{Optional directory for writing the four CSV outputs.}
+\item{output_dir}{Optional output directory for CSV files.}
 
-\item{seed}{Optional integer seed.}
+\item{y_col}{Outcome column name.}
 
-\item{min_n_eff_main}{Minimum effective sample size for main-direction rows.}
+\item{weight_col}{Weight column name.}
 
-\item{min_n_eff_interaction}{Minimum effective sample size for interaction-direction rows.}
+\item{group_vars}{Group variables used in the model.}
+
+\item{normalize_weights}{Logical; normalize weights to mean 1.}
 
 \item{xgb_params}{Optional xgboost parameter list.}
 
-\item{nrounds}{Number of boosting rounds for xgboost models.}
+\item{nrounds}{Number of xgboost boosting rounds.}
+
+\item{seed}{Optional integer seed.}
 
 \item{verbose}{xgboost verbosity.}
+
+\item{min_n_eff}{Minimum effective sample size for direction outputs.}
 }
 \value{
-A list containing the fitted model, SHAP objects, and four summary tables.
+A list containing fitted model, SHAP objects, and summary tables.
 }
 \description{
 Fits one of the four supported models, computes SHAP values, summarizes
-one-way and two-way strength/direction, and optionally writes four CSV files.
+one-way and two-way direction/strength, and optionally writes four CSV files:
+main strength, main direction, interaction strength, and interaction direction.
 }

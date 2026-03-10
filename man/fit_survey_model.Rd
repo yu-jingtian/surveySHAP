@@ -39,4 +39,8 @@ For \code{lm}/\code{glm}, the fit is performed on a sum-to-zero constrained
 basis so that no factor level is treated as an artificial reference group.
 The fitted object returned by this function includes reconstructed full
 level-by-level coefficients for both main effects and interactions.
+
+For xgboost models, only the main one-hot feature matrix is used as input,
+matching the original repo design. Interactions are handled by native
+TreeSHAP interaction values rather than explicit interaction columns.
 }

@@ -15,7 +15,8 @@ summarize_interaction_shap(
 \arguments{
 \item{interaction_obj}{Interaction SHAP representation. For linear models,
 this is an \eqn{n \times q} matrix with one column per level pair. For
-xgboost, this is an \eqn{n \times p \times p} array.}
+xgboost, this is an \eqn{n \times p \times p} array over the main one-hot
+features only.}
 
 \item{design}{A design object from \code{\link[=build_survey_design]{build_survey_design()}}.}
 

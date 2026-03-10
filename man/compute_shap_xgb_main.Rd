@@ -7,13 +7,14 @@
 compute_shap_xgb_main(fit_obj)
 }
 \arguments{
-\item{fit_obj}{A fitted object from \code{\link[=fit_survey_model]{fit_survey_model()}} with model equal
-to \code{"xgb_numeric"} or \code{"xgb_logistic"}.}
+\item{fit_obj}{A fitted xgboost object from \code{\link[=fit_survey_model]{fit_survey_model()}}.}
 }
 \value{
-A list with the main-effect SHAP matrix and the bias term.
+A list with the SHAP matrix, bias term, and scale label.
 }
 \description{
-Uses xgboost native TreeSHAP. For logistic xgboost, SHAP values are
-requested on the raw margin scale so that summaries are on the logit scale.
+Uses xgboost native TreeSHAP via \code{predcontrib = TRUE}. For
+\code{xgb_numeric}, SHAP is returned on the count scale. For
+\code{xgb_logistic}, SHAP is returned on the logit scale by using
+\code{outputmargin = TRUE}.
 }

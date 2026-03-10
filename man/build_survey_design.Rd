@@ -34,3 +34,8 @@ full dummy-by-dummy interaction design restricted to pairs of different
 variable groups, and a separate sum-to-zero coded linear design used by
 \code{lm}/\code{glm}.
 }
+\details{
+For xgboost models, only the main one-hot feature matrix is used as model
+input. Interactions for xgboost are obtained from native TreeSHAP interaction
+values, not by feeding explicit interaction columns into the model.
+}
