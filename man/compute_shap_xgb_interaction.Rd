@@ -13,10 +13,9 @@ compute_shap_xgb_interaction(fit_obj)
 A list with an interaction array, feature names, and scale label.
 }
 \description{
-Uses xgboost native TreeSHAP interaction values. The returned array contains
-only feature-by-feature interactions and excludes the bias dimension.
+Uses xgboost native TreeSHAP interaction values.
 }
 \details{
-xgboost is fit only on the main one-hot feature matrix, so this interaction
-array is over the original level indicators, matching the original repo logic.
+For \code{xgb_logistic}, these interaction values are already on the model
+margin scale (log-odds), so we do NOT also request \code{outputmargin = TRUE}.
 }

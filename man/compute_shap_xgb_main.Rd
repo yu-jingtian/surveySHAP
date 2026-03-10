@@ -13,8 +13,10 @@ compute_shap_xgb_main(fit_obj)
 A list with the SHAP matrix, bias term, and scale label.
 }
 \description{
-Uses xgboost native TreeSHAP via \code{predcontrib = TRUE}. For
-\code{xgb_numeric}, SHAP is returned on the count scale. For
-\code{xgb_logistic}, SHAP is returned on the logit scale by using
-\code{outputmargin = TRUE}.
+Uses xgboost native TreeSHAP via \code{predcontrib = TRUE}.
+}
+\details{
+For \code{xgb_numeric}, SHAP is on the count scale.
+For \code{xgb_logistic}, SHAP is already on the model margin scale, i.e.
+log-odds, so we do NOT also request \code{outputmargin = TRUE}.
 }
