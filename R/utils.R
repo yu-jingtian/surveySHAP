@@ -109,7 +109,15 @@ safe_level <- function(x) {
   if (L < 2) {
     stop("Group `", g, "` must have at least two levels for sum-to-zero coding.")
   }
-  out <- dummy_mat[, seq_len(L - 1), drop = FALSE] - dummy_mat[, L, drop = FALSE]
+
+  ref_col <- as.numeric(dummy_mat[, L])
+  out <- sweep(
+    dummy_mat[, seq_len(L - 1), drop = FALSE],
+    1,
+    ref_col,
+    FUN = "-"
+  )
+
   colnames(out) <- paste0(g, "__SC__", safe_level(levs[seq_len(L - 1)]))
   out
 }
