@@ -32,6 +32,11 @@ A fitted-model object used by downstream SHAP functions.
 }
 \description{
 Supported models are \code{"lm"}, \code{"glm"}, \code{"xgb_numeric"},
-and \code{"xgb_logistic"}. Linear-model fits include all main effects and
-all two-way interactions between different variable groups.
+and \code{"xgb_logistic"}.
+}
+\details{
+For \code{lm}/\code{glm}, the fit is performed on a sum-to-zero constrained
+basis so that no factor level is treated as an artificial reference group.
+The fitted object returned by this function includes reconstructed full
+level-by-level coefficients for both main effects and interactions.
 }

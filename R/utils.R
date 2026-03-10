@@ -42,6 +42,7 @@ prepare_survey_data <- function(data,
                                 group_vars = .default_groups(),
                                 normalize_weights = TRUE) {
   stopifnot(is.data.frame(data))
+
   if (!"college" %in% names(data)) {
     if (!"educ" %in% names(data)) stop("Missing `educ` needed to derive `college`.")
     data$college <- factor(
@@ -50,6 +51,7 @@ prepare_survey_data <- function(data,
       levels = c("Non-college", "College")
     )
   }
+
   if (!"metro" %in% names(data)) {
     if (!"rucc" %in% names(data)) stop("Missing `rucc` needed to derive `metro`.")
     data$metro <- factor(
@@ -58,21 +60,25 @@ prepare_survey_data <- function(data,
     )
   }
 
-  needed <- unique(c(y_col, group_vars, weight_col))
-  needed <- needed[needed %in% names(data)]
   missing_cols <- setdiff(c(y_col, group_vars), names(data))
   if (length(missing_cols) > 0) {
     stop("Missing columns in `data`: ", paste(missing_cols, collapse = ", "))
   }
 
+  needed <- unique(c(y_col, group_vars, weight_col))
+  needed <- needed[needed %in% names(data)]
   df <- data[, needed, drop = FALSE]
   names(df)[names(df) == y_col] <- "y_count"
   df$y_count <- as.numeric(df$y_count)
 
-  for (g in group_vars) df[[g]] <- as.factor(df[[g]])
+  for (g in group_vars) {
+    df[[g]] <- as.factor(df[[g]])
+  }
 
   cc_cols <- c("y_count", group_vars)
-  if (!is.null(weight_col) && weight_col %in% names(df)) cc_cols <- c(cc_cols, weight_col)
+  if (!is.null(weight_col) && weight_col %in% names(df)) {
+    cc_cols <- c(cc_cols, weight_col)
+  }
   df <- df[stats::complete.cases(df[, cc_cols, drop = FALSE]), , drop = FALSE]
   df <- droplevels(df)
 
@@ -94,4 +100,40 @@ feature_pair_label <- function(feature1, feature2) {
          paste(feature2, feature1, sep = "__"))
 }
 
-safe_level <- function(x) make.names(as.character(x), unique = FALSE)
+safe_level <- function(x) {
+  make.names(as.character(x), unique = FALSE)
+}
+
+.make_sum_coded_main <- function(dummy_mat, g, levs) {
+  L <- length(levs)
+  if (L < 2) {
+    stop("Group `", g, "` must have at least two levels for sum-to-zero coding.")
+  }
+  out <- dummy_mat[, seq_len(L - 1), drop = FALSE] - dummy_mat[, L, drop = FALSE]
+  colnames(out) <- paste0(g, "__SC__", safe_level(levs[seq_len(L - 1)]))
+  out
+}
+
+.reconstruct_main_sum_to_zero <- function(gamma, levs) {
+  L <- length(levs)
+  beta <- numeric(L)
+  names(beta) <- levs
+  if (L == 1) return(beta)
+  beta[seq_len(L - 1)] <- gamma
+  beta[L] <- -sum(gamma)
+  beta
+}
+
+.reconstruct_interaction_sum_to_zero <- function(gamma_mat, levs1, levs2) {
+  L1 <- length(levs1)
+  L2 <- length(levs2)
+  B <- matrix(0, nrow = L1, ncol = L2, dimnames = list(levs1, levs2))
+
+  if (L1 == 1 || L2 == 1) return(B)
+
+  B[seq_len(L1 - 1), seq_len(L2 - 1)] <- gamma_mat
+  B[L1, seq_len(L2 - 1)] <- -colSums(gamma_mat)
+  B[seq_len(L1 - 1), L2] <- -rowSums(gamma_mat)
+  B[L1, L2] <- sum(gamma_mat)
+  B
+}

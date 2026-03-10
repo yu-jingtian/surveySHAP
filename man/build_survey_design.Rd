@@ -24,11 +24,13 @@ build_survey_design(
 \item{normalize_weights}{Logical; normalize weights to mean 1.}
 }
 \value{
-A list containing the cleaned data, weights, outcome vectors,
-main-effect matrix, interaction matrix, design matrix, and column maps.
+A list containing the cleaned data, weights, outcomes, one-hot
+design objects for SHAP summaries, and the sum-to-zero coded linear
+design used for \code{lm}/\code{glm}.
 }
 \description{
 Creates a cleaned modeling frame, full one-hot main-effect design,
-and full dummy-by-dummy interaction design restricted to pairs of
-different variable groups.
+full dummy-by-dummy interaction design restricted to pairs of different
+variable groups, and a separate sum-to-zero coded linear design used by
+\code{lm}/\code{glm}.
 }

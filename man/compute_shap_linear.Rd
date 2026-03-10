@@ -7,15 +7,24 @@
 compute_shap_linear(fit_obj)
 }
 \arguments{
-\item{fit_obj}{A fitted object from \code{\link[=fit_survey_model]{fit_survey_model()}} with model
-equal to \code{"lm"} or \code{"glm"}.}
+\item{fit_obj}{A fitted object from \code{\link[=fit_survey_model]{fit_survey_model()}} with model equal
+to \code{"lm"} or \code{"glm"}.}
 }
 \value{
 A list with main and interaction SHAP matrices and associated maps.
 }
 \description{
 For \code{lm}, SHAP values are computed on the count scale. For
-\code{glm} with binomial family, SHAP values are computed on the logit
-scale. Main SHAP uses \eqn{\phi_j = \beta_j(x_j - \mu_j)} and interaction
-SHAP uses \eqn{\phi_{jk} = \beta_{jk}(x_j x_k - \mu_{jk})}.
+\code{glm} with binomial-family mean structure, SHAP values are computed
+on the logit scale.
+}
+\details{
+Main SHAP uses
+\deqn{\phi_j = \beta_j (x_j - \mu_j)}
+
+Interaction SHAP uses
+\deqn{\phi_{jk} = \beta_{jk} (x_j x_k - \mu_{jk})}
+
+where the \eqn{\beta}'s are reconstructed from a sum-to-zero constrained
+fit, so that no factor level is treated as an artificial reference level.
 }
