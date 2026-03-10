@@ -1,16 +1,16 @@
 Package: surveySHAP
 Type: Package
 Title: SHAP-Based Interpretation Tools for Survey Models
-Version: 0.1.0
+Version: 0.2.0
 Authors@R:
     person("Jingtian", "Yu",
            email = "your_email@domain.edu",
            role = c("aut", "cre"))
-Description:
-    Tools for interpreting machine learning models applied to survey data,
-    with a focus on ordinal and continuous policy preference outcomes.
-    The package provides SHAP-based utilities, visualization helpers,
-    and a curated processed survey dataset for reproducible examples.
+Description: Tools for fitting and interpreting four survey-model backends:
+    linear regression, binomial generalized linear models, numeric xgboost,
+    and logistic xgboost. The package provides explicit SHAP calculations for
+    lm/glm, native TreeSHAP for xgboost, weighted group-level summaries, and
+    bootstrap utilities.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
@@ -18,13 +18,10 @@ RoxygenNote: 7.3.2
 Depends:
     R (>= 4.1.0)
 Imports:
-    dplyr,
-    ggplot2,
     Matrix,
-    tibble,
-    xgboost,
     stats,
-    utils
+    utils,
+    xgboost
 Suggests:
     testthat (>= 3.0.0),
     knitr,

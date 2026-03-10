@@ -2,39 +2,37 @@
 % Please edit documentation in R/bootstrap.R
 \name{boot_strength}
 \alias{boot_strength}
-\title{Bootstrap a single SHAP strength target (main effect or interaction)}
+\title{Bootstrap a single strength target}
 \usage{
 boot_strength(
   data,
+  target = c("main", "interaction"),
   feature,
-  B = 200L,
+  model = c("lm", "glm", "xgb_numeric", "xgb_logistic"),
+  B = 100,
   conf = 0.95,
-  seed = 1L,
-  parallel = TRUE,
-  n_cores = NULL,
-  interaction_subsample_n = 5000L
+  seed = NULL
 )
 }
 \arguments{
-\item{data}{Input data.frame (same as run_survey_shap()).}
+\item{data}{Input data.frame.}
 
-\item{feature}{Character vector length 1 (main) or 2 (interaction).}
+\item{target}{Either \code{"main"} or \code{"interaction"}.}
 
-\item{B}{Number of bootstrap replicates.}
+\item{feature}{For main strength, a single feature name. For interaction
+strength, a character vector of length 2 giving \code{feature1} and \code{feature2}.}
 
-\item{conf}{CI level for percentile CI (default 0.95).}
+\item{model}{Model choice passed to \code{\link[=run_survey_shap]{run_survey_shap()}}.}
 
-\item{seed}{Optional integer seed for reproducibility.}
+\item{B}{Number of bootstrap resamples.}
 
-\item{parallel}{Logical; use parallel workers?}
+\item{conf}{Confidence level.}
 
-\item{n_cores}{Optional integer number of workers when parallel=TRUE.}
-
-\item{interaction_subsample_n}{Subsample size for interaction SHAP.}
+\item{seed}{Optional integer seed.}
 }
 \value{
-A list with target, estimate, boot vector, and summary.
+A one-row data.frame with estimate, bootstrap mean, sd, and percentile CI.
 }
 \description{
-Bootstrap a single SHAP strength target (main effect or interaction)
+Bootstrap a single strength target
 }

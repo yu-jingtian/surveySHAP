@@ -2,21 +2,44 @@
 % Please edit documentation in R/workflow.R
 \name{run_survey_shap}
 \alias{run_survey_shap}
-\title{Run the full XGBoost + SHAP workflow (main + interaction)}
+\title{Run the full surveySHAP pipeline}
 \usage{
-run_survey_shap(data, interaction_subsample_n = 5000L, seed = NULL)
+run_survey_shap(
+  data,
+  model = c("lm", "glm", "xgb_numeric", "xgb_logistic"),
+  output_dir = NULL,
+  seed = NULL,
+  min_n_eff_main = 100,
+  min_n_eff_interaction = 100,
+  xgb_params = NULL,
+  nrounds = 200,
+  verbose = 0
+)
 }
 \arguments{
 \item{data}{Input data.frame.}
 
-\item{interaction_subsample_n}{Subsample size for interaction SHAP.}
+\item{model}{One of \code{"lm"}, \code{"glm"}, \code{"xgb_numeric"}, or
+\code{"xgb_logistic"}.}
 
-\item{seed}{Optional integer seed. If provided, controls interaction subsampling and
-makes the overall pipeline more reproducible.}
+\item{output_dir}{Optional directory for writing the four CSV outputs.}
+
+\item{seed}{Optional integer seed.}
+
+\item{min_n_eff_main}{Minimum effective sample size for main-direction rows.}
+
+\item{min_n_eff_interaction}{Minimum effective sample size for interaction-direction rows.}
+
+\item{xgb_params}{Optional xgboost parameter list.}
+
+\item{nrounds}{Number of boosting rounds for xgboost models.}
+
+\item{verbose}{xgboost verbosity.}
 }
 \value{
-A list with fitted model and summary tables.
+A list containing the fitted model, SHAP objects, and four summary tables.
 }
 \description{
-Convenience wrapper that replicates the script outputs as data.frames.
+Fits one of the four supported models, computes SHAP values, summarizes
+one-way and two-way strength/direction, and optionally writes four CSV files.
 }

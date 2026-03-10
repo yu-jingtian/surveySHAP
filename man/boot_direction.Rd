@@ -2,44 +2,41 @@
 % Please edit documentation in R/bootstrap.R
 \name{boot_direction}
 \alias{boot_direction}
-\title{Bootstrap a single SHAP direction target (active SHAP)}
+\title{Bootstrap a single direction target}
 \usage{
 boot_direction(
   data,
+  target = c("main", "interaction"),
   feature,
   level,
-  B = 200L,
+  model = c("lm", "glm", "xgb_numeric", "xgb_logistic"),
+  B = 100,
   conf = 0.95,
-  seed = 1L,
-  parallel = TRUE,
-  n_cores = NULL,
-  interaction_subsample_n = 5000L
+  seed = NULL
 )
 }
 \arguments{
 \item{data}{Input data.frame.}
 
-\item{feature}{Character vector length 1 or 2.}
+\item{target}{Either \code{"main"} or \code{"interaction"}.}
 
-\item{level}{Character vector length 1 or 2 (must match feature length).}
+\item{feature}{For main direction, a single feature name. For interaction
+direction, a character vector of length 2.}
 
-\item{B}{Number of bootstrap replicates.}
+\item{level}{For main direction, a single level name. For interaction
+direction, a character vector of length 2.}
 
-\item{conf}{CI level for percentile CI (default 0.95).}
+\item{model}{Model choice passed to \code{\link[=run_survey_shap]{run_survey_shap()}}.}
 
-\item{seed}{Optional integer seed for reproducibility.}
+\item{B}{Number of bootstrap resamples.}
 
-\item{parallel}{Logical; use parallel workers?}
+\item{conf}{Confidence level.}
 
-\item{n_cores}{Optional integer number of workers when parallel=TRUE.}
-
-\item{interaction_subsample_n}{Subsample size for interaction SHAP.}
+\item{seed}{Optional integer seed.}
 }
 \value{
-A list with target, estimate, boot vector, and summary.
+A one-row data.frame with estimate, bootstrap mean, sd, and percentile CI.
 }
 \description{
-Main: direction(feature="partisan", level="Dem.") = mean active SHAP for that level.
-Interaction: direction((feat1,level1) × (feat2,level2)) = mean interaction SHAP among rows
-where BOTH one-hot indicators are active in the interaction subsample.
+Bootstrap a single direction target
 }
