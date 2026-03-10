@@ -18,22 +18,17 @@ summarize_main_shap <- function(shap_main, main_map, w = NULL, min_n_eff = 100) 
   }))
   strength <- strength[order(-strength$strength), , drop = FALSE]
 
-  direction <- do.call(rbind, lapply(seq_len(nrow(main_map)), function(i) {
-    col <- main_map$colname[i]
-    active <- which(shap_main[, col] == shap_main[, col] & (shap_main[, col] != 0 | TRUE) & (shap_main[, col] * 0 + 1 == 1))
-    # active rows are where the corresponding dummy equals 1; infer from centered SHAP impossible,
-    # so use level map from one-hot structure by matching positive indicator through reconstructed active rows.
-    NULL
-  }))
-
-  # direction from active rows based on dummy columns inferred from shap_main column names is not enough;
-  # reconstruct active rows from centered form using main_map ordering supplied by build_survey_design.
   direction_list <- vector("list", nrow(main_map))
+  X_main_attr <- attr(shap_main, "X_main")
+  if (is.null(X_main_attr)) {
+    stop("`shap_main` must carry attr(., 'X_main') for direction summaries.")
+  }
+
   for (i in seq_len(nrow(main_map))) {
     feature <- main_map$feature[i]
     level <- main_map$level[i]
     col <- main_map$colname[i]
-    idx <- which(attr(shap_main, "X_main")[, col] == 1)
+    idx <- which(X_main_attr[, col] == 1)
     w0 <- ww[idx]
     val <- shap_main[idx, col]
     direction_list[[i]] <- data.frame(
@@ -57,7 +52,8 @@ summarize_main_shap <- function(shap_main, main_map, w = NULL, min_n_eff = 100) 
 #'
 #' @param interaction_obj Interaction SHAP representation. For linear models,
 #'   this is an \eqn{n \times q} matrix with one column per level pair. For
-#'   xgboost, this is an \eqn{n \times p \times p} array.
+#'   xgboost, this is an \eqn{n \times p \times p} array over the main one-hot
+#'   features only.
 #' @param design A design object from [build_survey_design()].
 #' @param model One of the four supported model labels.
 #' @param w Optional weights.
@@ -76,12 +72,20 @@ summarize_interaction_shap <- function(interaction_obj,
   if (model %in% c("lm", "glm")) {
     shap_int <- interaction_obj
     int_map <- design$int_map
-    strength_pairs <- split(seq_len(nrow(int_map)), feature_pair_label(int_map$feature1, int_map$feature2))
+
+    strength_pairs <- split(seq_len(nrow(int_map)),
+                            feature_pair_label(int_map$feature1, int_map$feature2))
+
     strength <- do.call(rbind, lapply(names(strength_pairs), function(lbl) {
       idx <- strength_pairs[[lbl]]
       s <- rowSums(shap_int[, idx, drop = FALSE])
       feats <- strsplit(lbl, "__", fixed = TRUE)[[1]]
-      data.frame(feature1 = feats[1], feature2 = feats[2], strength = .wmean(abs(s), ww), stringsAsFactors = FALSE)
+      data.frame(
+        feature1 = feats[1],
+        feature2 = feats[2],
+        strength = .wmean(abs(s), ww),
+        stringsAsFactors = FALSE
+      )
     }))
     strength <- strength[order(-strength$strength), , drop = FALSE]
 
@@ -106,21 +110,22 @@ summarize_interaction_shap <- function(interaction_obj,
     return(list(strength = strength, direction = direction))
   }
 
+  ## xgboost: interaction array is over X_main only
   arr <- interaction_obj
-  all_names <- c(colnames(design$X_main), colnames(design$X_int))
-  p_main <- ncol(design$X_main)
-  if (length(all_names) != dim(arr)[2]) stop("Feature-name length mismatch in xgboost interaction array.")
-
-  main_feat <- c(design$main_map$feature, paste(design$int_map$feature1, design$int_map$feature2, sep = "___"))
-  # use only main-main blocks for group-pair summaries
   mm <- design$main_map
+  p_main <- ncol(design$X_main)
+
+  if (dim(arr)[2] != p_main || dim(arr)[3] != p_main) {
+    stop("xgboost interaction array dimension does not match ncol(design$X_main).")
+  }
+
   pairs <- utils::combn(seq_len(nrow(mm)), 2)
   keep <- mm$feature[pairs[1, ]] != mm$feature[pairs[2, ]]
   pairs <- pairs[, keep, drop = FALSE]
 
-  # strength at group-pair level by summing weighted mean absolute interaction over dummy pairs
   pair_keys <- feature_pair_label(mm$feature[pairs[1, ]], mm$feature[pairs[2, ]])
   uniq_keys <- unique(pair_keys)
+
   strength <- do.call(rbind, lapply(uniq_keys, function(key) {
     sel <- which(pair_keys == key)
     vals <- numeric(length(sel))
@@ -130,7 +135,12 @@ summarize_interaction_shap <- function(interaction_obj,
       vals[s] <- .wmean(abs(arr[, ii, jj]), ww)
     }
     feats <- strsplit(key, "__", fixed = TRUE)[[1]]
-    data.frame(feature1 = feats[1], feature2 = feats[2], strength = sum(vals), stringsAsFactors = FALSE)
+    data.frame(
+      feature1 = feats[1],
+      feature2 = feats[2],
+      strength = sum(vals),
+      stringsAsFactors = FALSE
+    )
   }))
   strength <- strength[order(-strength$strength), , drop = FALSE]
 
@@ -153,6 +163,7 @@ summarize_interaction_shap <- function(interaction_obj,
   }))
   direction <- direction[direction$n_eff >= min_n_eff, , drop = FALSE]
   rownames(direction) <- NULL
+
   list(strength = strength, direction = direction)
 }
 
@@ -189,7 +200,7 @@ print.surveySHAP_summary <- function(x, ...) {
   print(x$main_direction_top)
   cat("\nOne-way direction: BOTTOM\n")
   print(x$main_direction_bottom)
-  cat("\nTwo-way direction: TOP\n")
+  cat("\n\nTwo-way direction: TOP\n")
   print(x$interaction_direction_top)
   cat("\nTwo-way direction: BOTTOM\n")
   print(x$interaction_direction_bottom)

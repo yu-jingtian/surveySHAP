@@ -8,6 +8,10 @@
 #' The fitted object returned by this function includes reconstructed full
 #' level-by-level coefficients for both main effects and interactions.
 #'
+#' For xgboost models, only the main one-hot feature matrix is used as input,
+#' matching the original repo design. Interactions are handled by native
+#' TreeSHAP interaction values rather than explicit interaction columns.
+#'
 #' @param design A design object from [build_survey_design()].
 #' @param model One of \code{"lm"}, \code{"glm"}, \code{"xgb_numeric"}, or
 #'   \code{"xgb_logistic"}.
@@ -50,9 +54,10 @@ fit_survey_model <- function(design,
     gamma[is.na(gamma)] <- 0
     gamma <- setNames(as.numeric(gamma), colnames(X_lin))
 
-    ## reconstruct full symmetric coefficient vector on one-hot basis
-    beta_full <- setNames(numeric(1 + ncol(design$X_main) + ncol(design$X_int)),
-                          c("(Intercept)", colnames(design$X_main), colnames(design$X_int)))
+    beta_full <- setNames(
+      numeric(1 + ncol(design$X_main) + ncol(design$X_int)),
+      c("(Intercept)", colnames(design$X_main), colnames(design$X_int))
+    )
     beta_full["(Intercept)"] <- if ("(Intercept)" %in% names(gamma)) gamma["(Intercept)"] else 0
 
     ## main effects
@@ -155,6 +160,8 @@ fit_survey_model <- function(design,
     params$seed <- as.integer(seed)
   }
 
+  ## IMPORTANT:
+  ## xgboost uses ONLY X_main, matching the original repo
   dtrain <- xgboost::xgb.DMatrix(
     data = Matrix::Matrix(design$X_xgb, sparse = TRUE),
     label = if (model == "xgb_numeric") design$y_count else design$y_prop,

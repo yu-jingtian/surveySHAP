@@ -5,6 +5,10 @@
 #' variable groups, and a separate sum-to-zero coded linear design used by
 #' \code{lm}/\code{glm}.
 #'
+#' For xgboost models, only the main one-hot feature matrix is used as model
+#' input. Interactions for xgboost are obtained from native TreeSHAP interaction
+#' values, not by feeding explicit interaction columns into the model.
+#'
 #' @param data A data.frame containing the survey variables.
 #' @param y_col Outcome column name. Default is \code{"gun_control"}.
 #' @param weight_col Optional weight column name. Default is \code{"weight"}.
@@ -78,7 +82,7 @@ build_survey_design <- function(data,
     map1 <- main_map[main_map$feature == g1, , drop = FALSE]
     map2 <- main_map[main_map$feature == g2, , drop = FALSE]
 
-    ## full dummy-by-dummy interaction block for SHAP summaries
+    ## full dummy-by-dummy interaction block for lm/glm SHAP summaries
     for (i in seq_len(ncol(m1))) {
       for (j in seq_len(ncol(m2))) {
         k_full <- k_full + 1L
@@ -171,7 +175,10 @@ build_survey_design <- function(data,
   rownames(int_sc_meta) <- NULL
 
   X_linear <- cbind(`(Intercept)` = 1, X_main_sc, X_int_sc)
-  X_xgb <- cbind(X_main, X_int)
+
+  ## IMPORTANT:
+  ## xgboost uses ONLY the main one-hot matrix, matching the original repo setup
+  X_xgb <- X_main
 
   list(
     df = df,
