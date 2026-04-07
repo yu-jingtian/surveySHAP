@@ -4,12 +4,21 @@
 \alias{summarize_main_shap}
 \title{Summarize main-effect SHAP into strength and direction tables}
 \usage{
-summarize_main_shap(shap_main, main_map, w = NULL, min_n_eff = 100)
+summarize_main_shap(
+  shap_main,
+  main_map,
+  model = c("lm", "glm", "xgb_numeric", "xgb_logistic"),
+  w = NULL,
+  min_n_eff = 100
+)
 }
 \arguments{
 \item{shap_main}{An \eqn{n \times p} SHAP matrix for main effects.}
 
 \item{main_map}{Main-effect column map from \code{\link[=build_survey_design]{build_survey_design()}}.}
+
+\item{model}{One of \code{"lm"}, \code{"glm"}, \code{"xgb_numeric"},
+or \code{"xgb_logistic"}.}
 
 \item{w}{Optional weights.}
 
