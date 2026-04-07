@@ -2,15 +2,24 @@
 #'
 #' @param shap_main An \eqn{n \times p} SHAP matrix for main effects.
 #' @param main_map Main-effect column map from [build_survey_design()].
+#' @param model One of \code{"lm"}, \code{"glm"}, \code{"xgb_numeric"},
+#'   or \code{"xgb_logistic"}.
 #' @param w Optional weights.
 #' @param min_n_eff Minimum effective sample size for direction rows.
 #'
 #' @return A list with \code{strength} and \code{direction} data.frames.
 #' @export
-summarize_main_shap <- function(shap_main, main_map, w = NULL, min_n_eff = 100) {
+summarize_main_shap <- function(shap_main,
+                                main_map,
+                                model = c("lm", "glm", "xgb_numeric", "xgb_logistic"),
+                                w = NULL,
+                                min_n_eff = 100) {
+  model <- match.arg(model)
   ww <- if (is.null(w)) rep(1, nrow(shap_main)) else as.numeric(w)
 
   groups <- unique(main_map$feature)
+
+  # Strength is always grouped at the variable level
   strength <- do.call(rbind, lapply(groups, function(g) {
     cols <- main_map$colname[main_map$feature == g]
     s <- rowSums(shap_main[, cols, drop = FALSE])
@@ -18,19 +27,34 @@ summarize_main_shap <- function(shap_main, main_map, w = NULL, min_n_eff = 100) 
   }))
   strength <- strength[order(-strength$strength), , drop = FALSE]
 
-  direction_list <- vector("list", nrow(main_map))
   X_main_attr <- attr(shap_main, "X_main")
   if (is.null(X_main_attr)) {
     stop("`shap_main` must carry attr(., 'X_main') for direction summaries.")
   }
 
+  direction_list <- vector("list", nrow(main_map))
+
   for (i in seq_len(nrow(main_map))) {
     feature <- main_map$feature[i]
-    level <- main_map$level[i]
-    col <- main_map$colname[i]
+    level   <- main_map$level[i]
+    col     <- main_map$colname[i]
+
     idx <- which(X_main_attr[, col] == 1)
-    w0 <- ww[idx]
-    val <- shap_main[idx, col]
+    w0  <- ww[idx]
+
+    # For lm/glm, keep the level-specific definition from the LaTeX:
+    # Direction(k) = E[ phi_k | k ]
+    #
+    # For xgboost, use grouped feature SHAP conditional on the level:
+    # Direction(k) = E[ phi_feature | k ]
+    # where phi_feature sums over all one-hot columns of the feature.
+    if (model %in% c("lm", "glm")) {
+      val <- shap_main[idx, col]
+    } else {
+      feature_cols <- main_map$colname[main_map$feature == feature]
+      val <- rowSums(shap_main[idx, feature_cols, drop = FALSE])
+    }
+
     direction_list[[i]] <- data.frame(
       feature = feature,
       level = level,
@@ -41,6 +65,7 @@ summarize_main_shap <- function(shap_main, main_map, w = NULL, min_n_eff = 100) 
       stringsAsFactors = FALSE
     )
   }
+
   direction <- do.call(rbind, direction_list)
   direction <- direction[direction$n_eff >= min_n_eff, , drop = FALSE]
   rownames(direction) <- NULL
@@ -73,8 +98,10 @@ summarize_interaction_shap <- function(interaction_obj,
     shap_int <- interaction_obj
     int_map <- design$int_map
 
-    strength_pairs <- split(seq_len(nrow(int_map)),
-                            feature_pair_label(int_map$feature1, int_map$feature2))
+    strength_pairs <- split(
+      seq_len(nrow(int_map)),
+      feature_pair_label(int_map$feature1, int_map$feature2)
+    )
 
     strength <- do.call(rbind, lapply(names(strength_pairs), function(lbl) {
       idx <- strength_pairs[[lbl]]
@@ -89,6 +116,8 @@ summarize_interaction_shap <- function(interaction_obj,
     }))
     strength <- strength[order(-strength$strength), , drop = FALSE]
 
+    # For lm/glm, keep the level-pair-specific conditional definition:
+    # Direction(k,l) = E[ phi_{k,l} | k,l ]
     direction <- do.call(rbind, lapply(seq_len(nrow(int_map)), function(i) {
       idx <- which(design$X_int[, int_map$colname[i]] == 1)
       w0 <- ww[idx]
@@ -119,6 +148,7 @@ summarize_interaction_shap <- function(interaction_obj,
     stop("xgboost interaction array dimension does not match ncol(design$X_main).")
   }
 
+  # Build all cross-feature dummy-column pairs
   pairs <- utils::combn(seq_len(nrow(mm)), 2)
   keep <- mm$feature[pairs[1, ]] != mm$feature[pairs[2, ]]
   pairs <- pairs[, keep, drop = FALSE]
@@ -126,41 +156,87 @@ summarize_interaction_shap <- function(interaction_obj,
   pair_keys <- feature_pair_label(mm$feature[pairs[1, ]], mm$feature[pairs[2, ]])
   uniq_keys <- unique(pair_keys)
 
+  # Strength for xgboost: aggregate all dummy-pair interaction SHAPs
+  # within the feature pair, then take weighted mean absolute value
   strength <- do.call(rbind, lapply(uniq_keys, function(key) {
     sel <- which(pair_keys == key)
-    vals <- numeric(length(sel))
+    if (length(sel) == 0L) return(NULL)
+
+    tmp <- matrix(0, nrow = nrow(design$X_main), ncol = length(sel))
     for (s in seq_along(sel)) {
       ii <- pairs[1, sel[s]]
       jj <- pairs[2, sel[s]]
-      vals[s] <- .wmean(abs(arr[, ii, jj]), ww)
+      tmp[, s] <- arr[, ii, jj]
     }
+    s <- rowSums(tmp)
+
     feats <- strsplit(key, "__", fixed = TRUE)[[1]]
     data.frame(
       feature1 = feats[1],
       feature2 = feats[2],
-      strength = sum(vals),
+      strength = .wmean(abs(s), ww),
       stringsAsFactors = FALSE
     )
   }))
   strength <- strength[order(-strength$strength), , drop = FALSE]
 
-  direction <- do.call(rbind, lapply(seq_len(ncol(pairs)), function(k) {
-    ii <- pairs[1, k]
-    jj <- pairs[2, k]
-    idx <- which(design$X_main[, ii] == 1 & design$X_main[, jj] == 1)
+  # Direction for xgboost:
+  # For each level pair (k,l), condition on rows in that cell, but use the
+  # aggregated feature-pair interaction SHAP, not only the single dummy-pair SHAP.
+  direction_pairs <- unique(data.frame(
+    feature1 = mm$feature[pairs[1, ]],
+    feature2 = mm$feature[pairs[2, ]],
+    level1   = mm$level[pairs[1, ]],
+    level2   = mm$level[pairs[2, ]],
+    stringsAsFactors = FALSE
+  ))
+
+  direction <- do.call(rbind, lapply(seq_len(nrow(direction_pairs)), function(r) {
+    f1 <- direction_pairs$feature1[r]
+    f2 <- direction_pairs$feature2[r]
+    l1 <- direction_pairs$level1[r]
+    l2 <- direction_pairs$level2[r]
+
+    col1 <- mm$colname[mm$feature == f1 & mm$level == l1]
+    col2 <- mm$colname[mm$feature == f2 & mm$level == l2]
+
+    idx <- which(design$X_main[, col1] == 1 & design$X_main[, col2] == 1)
     w0 <- ww[idx]
+
+    cols1 <- which(mm$feature == f1)
+    cols2 <- which(mm$feature == f2)
+
+    if (length(idx) == 0L) {
+      val <- numeric(0)
+    } else {
+      tmp <- matrix(0, nrow = length(idx), ncol = length(cols1) * length(cols2))
+      cc <- 1L
+      for (ii in cols1) {
+        for (jj in cols2) {
+          if (ii < jj) {
+            tmp[, cc] <- arr[idx, ii, jj]
+          } else {
+            tmp[, cc] <- arr[idx, jj, ii]
+          }
+          cc <- cc + 1L
+        }
+      }
+      val <- rowSums(tmp)
+    }
+
     data.frame(
-      feature1 = mm$feature[ii],
-      feature2 = mm$feature[jj],
-      level1 = mm$level[ii],
-      level2 = mm$level[jj],
-      direction = .wmean(arr[idx, ii, jj], w0),
+      feature1 = f1,
+      feature2 = f2,
+      level1 = l1,
+      level2 = l2,
+      direction = .wmean(val, w0),
       n_raw = length(idx),
       w_sum = sum(w0),
       n_eff = .n_eff(w0),
       stringsAsFactors = FALSE
     )
   }))
+
   direction <- direction[direction$n_eff >= min_n_eff, , drop = FALSE]
   rownames(direction) <- NULL
 

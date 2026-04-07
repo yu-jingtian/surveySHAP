@@ -60,6 +60,7 @@ run_survey_shap <- function(data,
     main_sum <- summarize_main_shap(
       shap_main = shap_main_mat,
       main_map = design$main_map,
+      model = model,
       w = design$w,
       min_n_eff = min_n_eff
     )
@@ -94,6 +95,7 @@ run_survey_shap <- function(data,
     main_sum <- summarize_main_shap(
       shap_main = shap_main_mat,
       main_map = design$main_map,
+      model = model,
       w = design$w,
       min_n_eff = min_n_eff
     )
