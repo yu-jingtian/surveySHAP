@@ -7,8 +7,8 @@
 #' Main SHAP uses
 #' \deqn{\phi_j = \beta_j (x_j - \mu_j)}
 #'
-#' Interaction SHAP uses
-#' \deqn{\phi_{jk} = \beta_{jk} (x_j x_k - \mu_{jk})}
+#' Interaction SHAP uses the pairwise SHAP-interaction form
+#' \deqn{\phi_{jk}^{\mathrm{int}} = \tfrac{1}{2}\,\beta_{jk}(x_j - \mu_j)(x_k - \mu_k)}
 #'
 #' where the \eqn{\beta}'s are reconstructed from a sum-to-zero constrained
 #' fit, so that no factor level is treated as an artificial reference level.
@@ -39,15 +39,39 @@ compute_shap_linear <- function(fit_obj) {
   colnames(shap_main) <- colnames(X_main)
 
   ## interaction SHAP
+  ## For each dummy-pair interaction column corresponding to (j, k), use the
+  ## pairwise SHAP-interaction form
+  ##   0.5 * beta_jk * (x_j - mu_j) * (x_k - mu_k)
+  ## rather than the centered explicit interaction-term contribution
+  ##   beta_jk * (x_j x_k - mu_jk).
   if (ncol(X_int) > 0) {
-    mu_int <- vapply(seq_len(ncol(X_int)), function(j) .wmean(X_int[, j], ww), numeric(1))
-    shap_int <- sweep(X_int, 2, mu_int, FUN = "-")
+    shap_int <- matrix(0, nrow = nrow(X_main), ncol = ncol(X_int))
+    colnames(shap_int) <- colnames(X_int)
 
     beta_int <- beta_full[colnames(X_int)]
     beta_int[is.na(beta_int)] <- 0
 
-    shap_int <- sweep(shap_int, 2, beta_int, FUN = "*")
-    colnames(shap_int) <- colnames(X_int)
+    main_lookup <- setNames(seq_len(ncol(X_main)), colnames(X_main))
+
+    for (i in seq_len(nrow(design$int_map))) {
+      col1 <- paste0(
+        design$int_map$feature1[i], "__", safe_level(design$int_map$level1[i])
+      )
+      col2 <- paste0(
+        design$int_map$feature2[i], "__", safe_level(design$int_map$level2[i])
+      )
+
+      j1 <- unname(main_lookup[col1])
+      j2 <- unname(main_lookup[col2])
+
+      if (is.na(j1) || is.na(j2)) {
+        stop("Could not match interaction level pair back to X_main columns.")
+      }
+
+      shap_int[, i] <- 0.5 * beta_int[i] *
+        (X_main[, j1] - mu_main[j1]) *
+        (X_main[, j2] - mu_main[j2])
+    }
   } else {
     shap_int <- matrix(0, nrow(X_main), 0)
   }

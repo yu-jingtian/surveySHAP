@@ -22,8 +22,8 @@ on the logit scale.
 Main SHAP uses
 \deqn{\phi_j = \beta_j (x_j - \mu_j)}
 
-Interaction SHAP uses
-\deqn{\phi_{jk} = \beta_{jk} (x_j x_k - \mu_{jk})}
+Interaction SHAP uses the pairwise SHAP-interaction form
+\deqn{\phi_{jk}^{\mathrm{int}} = \tfrac{1}{2}\,\beta_{jk}(x_j - \mu_j)(x_k - \mu_k)}
 
 where the \eqn{\beta}'s are reconstructed from a sum-to-zero constrained
 fit, so that no factor level is treated as an artificial reference level.
