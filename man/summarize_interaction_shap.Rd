@@ -30,5 +30,10 @@ features only.}
 A list with \code{strength} and \code{direction} data.frames.
 }
 \description{
-Summarize interaction SHAP into strength and direction tables
+Both strength and direction are computed from grouped feature-pair SHAP
+contributions. For a pair of categorical variables, SHAP interaction values
+are first summed over all one-hot level-pair columns belonging to that
+feature pair; strength then averages the absolute grouped contribution,
+while direction averages the signed grouped contribution conditional on each
+observed level pair.
 }

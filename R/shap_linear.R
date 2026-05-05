@@ -10,8 +10,9 @@
 #' Interaction SHAP uses the pairwise SHAP-interaction form
 #' \deqn{\phi_{jk}^{\mathrm{int}} = \tfrac{1}{2}\,\beta_{jk}(x_j - \mu_j)(x_k - \mu_k)}
 #'
-#' where the \eqn{\beta}'s are reconstructed from a sum-to-zero constrained
-#' fit, so that no factor level is treated as an artificial reference level.
+#' where the \eqn{\beta}'s come from a regular treatment-coded linear fit and
+#' are mapped back to the full one-hot main-effect and dummy-by-dummy
+#' interaction design. Reference-level terms have coefficient zero.
 #'
 #' @param fit_obj A fitted object from [fit_survey_model()] with model equal
 #'   to \code{"lm"} or \code{"glm"}.
@@ -28,7 +29,7 @@ compute_shap_linear <- function(fit_obj) {
   w <- design$w
   ww <- if (is.null(w)) rep(1, nrow(X_main)) else w
 
-  ## main SHAP
+  ## Main SHAP.
   mu_main <- vapply(seq_len(ncol(X_main)), function(j) .wmean(X_main[, j], ww), numeric(1))
   shap_main <- sweep(X_main, 2, mu_main, FUN = "-")
 
@@ -38,7 +39,7 @@ compute_shap_linear <- function(fit_obj) {
   shap_main <- sweep(shap_main, 2, beta_main, FUN = "*")
   colnames(shap_main) <- colnames(X_main)
 
-  ## interaction SHAP
+  ## Interaction SHAP.
   ## For each dummy-pair interaction column corresponding to (j, k), use the
   ## pairwise SHAP-interaction form
   ##   0.5 * beta_jk * (x_j - mu_j) * (x_k - mu_k)

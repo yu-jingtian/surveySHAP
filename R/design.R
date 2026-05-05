@@ -2,12 +2,14 @@
 #'
 #' Creates a cleaned modeling frame, full one-hot main-effect design,
 #' full dummy-by-dummy interaction design restricted to pairs of different
-#' variable groups, and a separate sum-to-zero coded linear design used by
+#' variable groups, and a regular treatment-coded linear design used by
 #' \code{lm}/\code{glm}.
 #'
-#' For xgboost models, only the main one-hot feature matrix is used as model
-#' input. Interactions for xgboost are obtained from native TreeSHAP interaction
-#' values, not by feeding explicit interaction columns into the model.
+#' For linear models, the first level of each factor is treated as the
+#' reference level. For xgboost models, only the main one-hot feature matrix is
+#' used as model input. Interactions for xgboost are obtained from native
+#' TreeSHAP interaction values, not by feeding explicit interaction columns
+#' into the model.
 #'
 #' @param data A data.frame containing the survey variables.
 #' @param y_col Outcome column name. Default is \code{"gun_control"}.
@@ -16,8 +18,8 @@
 #' @param normalize_weights Logical; normalize weights to mean 1.
 #'
 #' @return A list containing the cleaned data, weights, outcomes, one-hot
-#'   design objects for SHAP summaries, and the sum-to-zero coded linear
-#'   design used for \code{lm}/\code{glm}.
+#'   design objects for SHAP summaries, and the treatment-coded linear design
+#'   used for \code{lm}/\code{glm}.
 #' @export
 build_survey_design <- function(data,
                                 y_col = "gun_control",
@@ -37,7 +39,7 @@ build_survey_design <- function(data,
 
   main_blocks <- list()
   main_map <- list()
-  main_sc_blocks <- list()
+  linear_main_blocks <- list()
   group_levels <- list()
 
   for (g in group_vars) {
@@ -55,7 +57,12 @@ build_survey_design <- function(data,
       stringsAsFactors = FALSE
     )
 
-    main_sc_blocks[[g]] <- .make_sum_coded_main(mm, g = g, levs = levs)
+    ## Regular treatment/reference coding for lm/glm:
+    ## use the first factor level as reference, matching R's default
+    ## contr.treatment convention. The columns keep the corresponding
+    ## one-hot names so they can be mapped directly back to the full
+    ## indicator-level SHAP summaries.
+    linear_main_blocks[[g]] <- .make_treatment_coded_main(mm, g = g, levs = levs)
   }
 
   X_main <- do.call(cbind, main_blocks)
@@ -67,11 +74,10 @@ build_survey_design <- function(data,
   int_blocks <- list()
   int_map <- list()
 
-  int_sc_blocks <- list()
-  int_sc_meta <- list()
+  linear_int_blocks <- list()
 
   k_full <- 0L
-  k_sc <- 0L
+  k_linear <- 0L
 
   for (pair in pair_df) {
     g1 <- pair[1]
@@ -82,7 +88,7 @@ build_survey_design <- function(data,
     map1 <- main_map[main_map$feature == g1, , drop = FALSE]
     map2 <- main_map[main_map$feature == g2, , drop = FALSE]
 
-    ## full dummy-by-dummy interaction block for lm/glm SHAP summaries
+    ## Full dummy-by-dummy interaction block used for SHAP summaries.
     for (i in seq_len(ncol(m1))) {
       for (j in seq_len(ncol(m2))) {
         k_full <- k_full + 1L
@@ -104,30 +110,23 @@ build_survey_design <- function(data,
       }
     }
 
-    ## reduced sum-to-zero interaction block for lm/glm fitting
-    sc1 <- main_sc_blocks[[g1]]
-    sc2 <- main_sc_blocks[[g2]]
-    levs1 <- group_levels[[g1]]
-    levs2 <- group_levels[[g2]]
+    ## Treatment-coded interaction block for lm/glm fitting. Since the first
+    ## level of each factor is the reference, only non-reference dummy columns
+    ## enter the regular linear-model design.
+    lm1 <- linear_main_blocks[[g1]]
+    lm2 <- linear_main_blocks[[g2]]
 
-    for (i in seq_len(ncol(sc1))) {
-      for (j in seq_len(ncol(sc2))) {
-        k_sc <- k_sc + 1L
-        cname_sc <- paste0(
-          g1, "__SC__", safe_level(levs1[i]),
-          "___",
-          g2, "__SC__", safe_level(levs2[j])
-        )
-        int_sc_blocks[[k_sc]] <- matrix(sc1[, i] * sc2[, j], ncol = 1,
-                                        dimnames = list(NULL, cname_sc))
-        int_sc_meta[[k_sc]] <- data.frame(
-          colname = cname_sc,
-          feature1 = g1,
-          feature2 = g2,
-          i = i,
-          j = j,
-          stringsAsFactors = FALSE
-        )
+    if (ncol(lm1) > 0 && ncol(lm2) > 0) {
+      for (i in seq_len(ncol(lm1))) {
+        for (j in seq_len(ncol(lm2))) {
+          k_linear <- k_linear + 1L
+          cname_linear <- paste0(colnames(lm1)[i], "___", colnames(lm2)[j])
+          linear_int_blocks[[k_linear]] <- matrix(
+            lm1[, i] * lm2[, j],
+            ncol = 1,
+            dimnames = list(NULL, cname_linear)
+          )
+        }
       }
     }
   }
@@ -152,32 +151,21 @@ build_survey_design <- function(data,
   }
   rownames(int_map) <- NULL
 
-  X_main_sc <- do.call(cbind, main_sc_blocks)
-
-  X_int_sc <- if (length(int_sc_blocks) > 0) {
-    do.call(cbind, int_sc_blocks)
+  X_main_linear <- if (length(linear_main_blocks) > 0) {
+    do.call(cbind, linear_main_blocks)
   } else {
     matrix(0, nrow(df), 0)
   }
 
-  int_sc_meta <- if (length(int_sc_meta) > 0) {
-    do.call(rbind, int_sc_meta)
+  X_int_linear <- if (length(linear_int_blocks) > 0) {
+    do.call(cbind, linear_int_blocks)
   } else {
-    data.frame(
-      colname = character(0),
-      feature1 = character(0),
-      feature2 = character(0),
-      i = integer(0),
-      j = integer(0),
-      stringsAsFactors = FALSE
-    )
+    matrix(0, nrow(df), 0)
   }
-  rownames(int_sc_meta) <- NULL
 
-  X_linear <- cbind(`(Intercept)` = 1, X_main_sc, X_int_sc)
+  X_linear <- cbind(`(Intercept)` = 1, X_main_linear, X_int_linear)
 
-  ## IMPORTANT:
-  ## xgboost uses ONLY the main one-hot matrix, matching the original repo setup
+  ## xgboost uses ONLY the main one-hot matrix, matching the original repo setup.
   X_xgb <- X_main
 
   list(
@@ -192,14 +180,13 @@ build_survey_design <- function(data,
     X_int = X_int,
     X = cbind(`(Intercept)` = 1, X_main, X_int),
 
-    X_main_sc = X_main_sc,
-    X_int_sc = X_int_sc,
+    X_main_linear = X_main_linear,
+    X_int_linear = X_int_linear,
     X_linear = X_linear,
     X_xgb = X_xgb,
 
     main_map = main_map,
     int_map = int_map,
-    int_sc_meta = int_sc_meta,
     group_levels = group_levels,
     group_vars = group_vars
   )

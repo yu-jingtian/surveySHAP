@@ -35,10 +35,11 @@ Supported models are \code{"lm"}, \code{"glm"}, \code{"xgb_numeric"},
 and \code{"xgb_logistic"}.
 }
 \details{
-For \code{lm}/\code{glm}, the fit is performed on a sum-to-zero constrained
-basis so that no factor level is treated as an artificial reference group.
-The fitted object returned by this function includes reconstructed full
-level-by-level coefficients for both main effects and interactions.
+For \code{lm}/\code{glm}, the fit is performed using regular treatment
+coding, with the first level of each factor used as the reference level.
+The returned object stores coefficients mapped back onto the full one-hot
+main-effect and dummy-by-dummy interaction design. Reference-level terms are
+assigned coefficient zero.
 
 For xgboost models, only the main one-hot feature matrix is used as input,
 matching the original repo design. Interactions are handled by native

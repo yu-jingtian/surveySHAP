@@ -1,5 +1,11 @@
 #' Summarize main-effect SHAP into strength and direction tables
 #'
+#' Both strength and direction are computed from grouped feature-level SHAP
+#' contributions. For a categorical variable, SHAP values are first summed
+#' over all one-hot columns belonging to that variable; strength then averages
+#' the absolute grouped contribution, while direction averages the signed
+#' grouped contribution conditional on each observed level.
+#'
 #' @param shap_main An \eqn{n \times p} SHAP matrix for main effects.
 #' @param main_map Main-effect column map from [build_survey_design()].
 #' @param model One of \code{"lm"}, \code{"glm"}, \code{"xgb_numeric"},
@@ -19,7 +25,7 @@ summarize_main_shap <- function(shap_main,
 
   groups <- unique(main_map$feature)
 
-  # Strength is always grouped at the variable level
+  ## Group first, then take absolute value for strength.
   strength <- do.call(rbind, lapply(groups, function(g) {
     cols <- main_map$colname[main_map$feature == g]
     s <- rowSums(shap_main[, cols, drop = FALSE])
@@ -42,18 +48,10 @@ summarize_main_shap <- function(shap_main,
     idx <- which(X_main_attr[, col] == 1)
     w0  <- ww[idx]
 
-    # For lm/glm, keep the level-specific definition from the LaTeX:
-    # Direction(k) = E[ phi_k | k ]
-    #
-    # For xgboost, use grouped feature SHAP conditional on the level:
-    # Direction(k) = E[ phi_feature | k ]
-    # where phi_feature sums over all one-hot columns of the feature.
-    if (model %in% c("lm", "glm")) {
-      val <- shap_main[idx, col]
-    } else {
-      feature_cols <- main_map$colname[main_map$feature == feature]
-      val <- rowSums(shap_main[idx, feature_cols, drop = FALSE])
-    }
+    ## Grouped direction:
+    ## Direction_j(level) = E[ sum_{r in levels(j)} phi_{j,r} | X_j = level ].
+    feature_cols <- main_map$colname[main_map$feature == feature]
+    val <- rowSums(shap_main[idx, feature_cols, drop = FALSE])
 
     direction_list[[i]] <- data.frame(
       feature = feature,
@@ -74,6 +72,13 @@ summarize_main_shap <- function(shap_main,
 }
 
 #' Summarize interaction SHAP into strength and direction tables
+#'
+#' Both strength and direction are computed from grouped feature-pair SHAP
+#' contributions. For a pair of categorical variables, SHAP interaction values
+#' are first summed over all one-hot level-pair columns belonging to that
+#' feature pair; strength then averages the absolute grouped contribution,
+#' while direction averages the signed grouped contribution conditional on each
+#' observed level pair.
 #'
 #' @param interaction_obj Interaction SHAP representation. For linear models,
 #'   this is an \eqn{n \times q} matrix with one column per level pair. For
@@ -103,6 +108,7 @@ summarize_interaction_shap <- function(interaction_obj,
       feature_pair_label(int_map$feature1, int_map$feature2)
     )
 
+    ## Group first, then take absolute value for strength.
     strength <- do.call(rbind, lapply(names(strength_pairs), function(lbl) {
       idx <- strength_pairs[[lbl]]
       s <- rowSums(shap_int[, idx, drop = FALSE])
@@ -116,19 +122,30 @@ summarize_interaction_shap <- function(interaction_obj,
     }))
     strength <- strength[order(-strength$strength), , drop = FALSE]
 
-    # For lm/glm, keep the level-pair-specific conditional definition:
-    # Direction(k,l) = E[ phi_{k,l} | k,l ]
+    ## Grouped direction:
+    ## Direction_{jk}(level_j, level_k) =
+    ##   E[ sum_{r in levels(j)} sum_{s in levels(k)} phi_{jr,ks}
+    ##      | X_j = level_j, X_k = level_k ].
     direction <- do.call(rbind, lapply(seq_len(nrow(int_map)), function(i) {
-      idx <- which(design$X_int[, int_map$colname[i]] == 1)
-      w0 <- ww[idx]
-      val <- shap_int[idx, i]
+      f1 <- int_map$feature1[i]
+      f2 <- int_map$feature2[i]
+      l1 <- int_map$level1[i]
+      l2 <- int_map$level2[i]
+
+      cell_col <- int_map$colname[i]
+      row_idx <- which(design$X_int[, cell_col] == 1)
+      w0 <- ww[row_idx]
+
+      pair_cols <- which(int_map$feature1 == f1 & int_map$feature2 == f2)
+      val <- rowSums(shap_int[row_idx, pair_cols, drop = FALSE])
+
       data.frame(
-        feature1 = int_map$feature1[i],
-        feature2 = int_map$feature2[i],
-        level1 = int_map$level1[i],
-        level2 = int_map$level2[i],
+        feature1 = f1,
+        feature2 = f2,
+        level1 = l1,
+        level2 = l2,
         direction = .wmean(val, w0),
-        n_raw = length(idx),
+        n_raw = length(row_idx),
         w_sum = sum(w0),
         n_eff = .n_eff(w0),
         stringsAsFactors = FALSE
@@ -139,7 +156,7 @@ summarize_interaction_shap <- function(interaction_obj,
     return(list(strength = strength, direction = direction))
   }
 
-  ## xgboost: interaction array is over X_main only
+  ## xgboost: interaction array is over X_main only.
   arr <- interaction_obj
   mm <- design$main_map
   p_main <- ncol(design$X_main)
@@ -148,7 +165,7 @@ summarize_interaction_shap <- function(interaction_obj,
     stop("xgboost interaction array dimension does not match ncol(design$X_main).")
   }
 
-  # Build all cross-feature dummy-column pairs
+  ## Build all cross-feature dummy-column pairs.
   pairs <- utils::combn(seq_len(nrow(mm)), 2)
   keep <- mm$feature[pairs[1, ]] != mm$feature[pairs[2, ]]
   pairs <- pairs[, keep, drop = FALSE]
@@ -156,8 +173,8 @@ summarize_interaction_shap <- function(interaction_obj,
   pair_keys <- feature_pair_label(mm$feature[pairs[1, ]], mm$feature[pairs[2, ]])
   uniq_keys <- unique(pair_keys)
 
-  # Strength for xgboost: aggregate all dummy-pair interaction SHAPs
-  # within the feature pair, then take weighted mean absolute value
+  ## Strength for xgboost: group all dummy-pair interaction SHAPs within the
+  ## feature pair, then take weighted mean absolute value.
   strength <- do.call(rbind, lapply(uniq_keys, function(key) {
     sel <- which(pair_keys == key)
     if (length(sel) == 0L) return(NULL)
@@ -180,9 +197,8 @@ summarize_interaction_shap <- function(interaction_obj,
   }))
   strength <- strength[order(-strength$strength), , drop = FALSE]
 
-  # Direction for xgboost:
-  # For each level pair (k,l), condition on rows in that cell, but use the
-  # aggregated feature-pair interaction SHAP, not only the single dummy-pair SHAP.
+  ## Direction for xgboost: condition on each observed level pair, but use the
+  ## grouped feature-pair interaction SHAP, not only one dummy-pair SHAP.
   direction_pairs <- unique(data.frame(
     feature1 = mm$feature[pairs[1, ]],
     feature2 = mm$feature[pairs[2, ]],

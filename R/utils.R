@@ -104,44 +104,13 @@ safe_level <- function(x) {
   make.names(as.character(x), unique = FALSE)
 }
 
-.make_sum_coded_main <- function(dummy_mat, g, levs) {
+.make_treatment_coded_main <- function(dummy_mat, g, levs) {
   L <- length(levs)
   if (L < 2) {
-    stop("Group `", g, "` must have at least two levels for sum-to-zero coding.")
+    return(matrix(0, nrow(dummy_mat), 0))
   }
 
-  ref_col <- as.numeric(dummy_mat[, L])
-  out <- sweep(
-    dummy_mat[, seq_len(L - 1), drop = FALSE],
-    1,
-    ref_col,
-    FUN = "-"
-  )
-
-  colnames(out) <- paste0(g, "__SC__", safe_level(levs[seq_len(L - 1)]))
+  out <- dummy_mat[, seq.int(2L, L), drop = FALSE]
+  colnames(out) <- paste0(g, "__", safe_level(levs[seq.int(2L, L)]))
   out
-}
-
-.reconstruct_main_sum_to_zero <- function(gamma, levs) {
-  L <- length(levs)
-  beta <- numeric(L)
-  names(beta) <- levs
-  if (L == 1) return(beta)
-  beta[seq_len(L - 1)] <- gamma
-  beta[L] <- -sum(gamma)
-  beta
-}
-
-.reconstruct_interaction_sum_to_zero <- function(gamma_mat, levs1, levs2) {
-  L1 <- length(levs1)
-  L2 <- length(levs2)
-  B <- matrix(0, nrow = L1, ncol = L2, dimnames = list(levs1, levs2))
-
-  if (L1 == 1 || L2 == 1) return(B)
-
-  B[seq_len(L1 - 1), seq_len(L2 - 1)] <- gamma_mat
-  B[L1, seq_len(L2 - 1)] <- -colSums(gamma_mat)
-  B[seq_len(L1 - 1), L2] <- -rowSums(gamma_mat)
-  B[L1, L2] <- sum(gamma_mat)
-  B
 }

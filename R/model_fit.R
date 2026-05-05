@@ -3,10 +3,11 @@
 #' Supported models are \code{"lm"}, \code{"glm"}, \code{"xgb_numeric"},
 #' and \code{"xgb_logistic"}.
 #'
-#' For \code{lm}/\code{glm}, the fit is performed on a sum-to-zero constrained
-#' basis so that no factor level is treated as an artificial reference group.
-#' The fitted object returned by this function includes reconstructed full
-#' level-by-level coefficients for both main effects and interactions.
+#' For \code{lm}/\code{glm}, the fit is performed using regular treatment
+#' coding, with the first level of each factor used as the reference level.
+#' The returned object stores coefficients mapped back onto the full one-hot
+#' main-effect and dummy-by-dummy interaction design. Reference-level terms are
+#' assigned coefficient zero.
 #'
 #' For xgboost models, only the main one-hot feature matrix is used as input,
 #' matching the original repo design. Interactions are handled by native
@@ -58,66 +59,9 @@ fit_survey_model <- function(design,
       numeric(1 + ncol(design$X_main) + ncol(design$X_int)),
       c("(Intercept)", colnames(design$X_main), colnames(design$X_int))
     )
-    beta_full["(Intercept)"] <- if ("(Intercept)" %in% names(gamma)) gamma["(Intercept)"] else 0
 
-    ## main effects
-    for (g in design$group_vars) {
-      levs <- design$group_levels[[g]]
-      L <- length(levs)
-      sc_names <- if (L > 1) {
-        paste0(g, "__SC__", safe_level(levs[seq_len(L - 1)]))
-      } else {
-        character(0)
-      }
-      gamma_g <- if (length(sc_names) > 0) gamma[sc_names] else numeric(0)
-      gamma_g[is.na(gamma_g)] <- 0
-      beta_g <- .reconstruct_main_sum_to_zero(gamma_g, levs = levs)
-
-      full_names <- paste0(g, "__", safe_level(levs))
-      beta_full[full_names] <- as.numeric(beta_g)
-    }
-
-    ## interactions
-    pair_df <- utils::combn(design$group_vars, 2, simplify = FALSE)
-    for (pair in pair_df) {
-      g1 <- pair[1]
-      g2 <- pair[2]
-      levs1 <- design$group_levels[[g1]]
-      levs2 <- design$group_levels[[g2]]
-      L1 <- length(levs1)
-      L2 <- length(levs2)
-
-      if (L1 < 2 || L2 < 2) {
-        B <- matrix(0, nrow = L1, ncol = L2, dimnames = list(levs1, levs2))
-      } else {
-        gamma_names <- expand.grid(
-          i = seq_len(L1 - 1),
-          j = seq_len(L2 - 1),
-          KEEP.OUT.ATTRS = FALSE,
-          stringsAsFactors = FALSE
-        )
-        sc_cols <- paste0(
-          g1, "__SC__", safe_level(levs1[gamma_names$i]),
-          "___",
-          g2, "__SC__", safe_level(levs2[gamma_names$j])
-        )
-        gamma_vec <- gamma[sc_cols]
-        gamma_vec[is.na(gamma_vec)] <- 0
-        gamma_mat <- matrix(gamma_vec, nrow = L1 - 1, ncol = L2 - 1, byrow = FALSE)
-        B <- .reconstruct_interaction_sum_to_zero(gamma_mat, levs1 = levs1, levs2 = levs2)
-      }
-
-      for (i in seq_len(L1)) {
-        for (j in seq_len(L2)) {
-          full_name <- paste0(
-            g1, "__", safe_level(levs1[i]),
-            "___",
-            g2, "__", safe_level(levs2[j])
-          )
-          beta_full[full_name] <- B[i, j]
-        }
-      }
-    }
+    common_terms <- intersect(names(beta_full), names(gamma))
+    beta_full[common_terms] <- gamma[common_terms]
 
     return(list(
       model_type = model,
@@ -160,8 +104,7 @@ fit_survey_model <- function(design,
     params$seed <- as.integer(seed)
   }
 
-  ## IMPORTANT:
-  ## xgboost uses ONLY X_main, matching the original repo
+  ## xgboost uses ONLY X_main, matching the original repo.
   dtrain <- xgboost::xgb.DMatrix(
     data = Matrix::Matrix(design$X_xgb, sparse = TRUE),
     label = if (model == "xgb_numeric") design$y_count else design$y_prop,

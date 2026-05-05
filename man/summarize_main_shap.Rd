@@ -28,5 +28,9 @@ or \code{"xgb_logistic"}.}
 A list with \code{strength} and \code{direction} data.frames.
 }
 \description{
-Summarize main-effect SHAP into strength and direction tables
+Both strength and direction are computed from grouped feature-level SHAP
+contributions. For a categorical variable, SHAP values are first summed
+over all one-hot columns belonging to that variable; strength then averages
+the absolute grouped contribution, while direction averages the signed
+grouped contribution conditional on each observed level.
 }

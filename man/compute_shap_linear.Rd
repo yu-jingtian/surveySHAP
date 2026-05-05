@@ -25,6 +25,7 @@ Main SHAP uses
 Interaction SHAP uses the pairwise SHAP-interaction form
 \deqn{\phi_{jk}^{\mathrm{int}} = \tfrac{1}{2}\,\beta_{jk}(x_j - \mu_j)(x_k - \mu_k)}
 
-where the \eqn{\beta}'s are reconstructed from a sum-to-zero constrained
-fit, so that no factor level is treated as an artificial reference level.
+where the \eqn{\beta}'s come from a regular treatment-coded linear fit and
+are mapped back to the full one-hot main-effect and dummy-by-dummy
+interaction design. Reference-level terms have coefficient zero.
 }

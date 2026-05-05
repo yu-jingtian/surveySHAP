@@ -25,17 +25,19 @@ build_survey_design(
 }
 \value{
 A list containing the cleaned data, weights, outcomes, one-hot
-design objects for SHAP summaries, and the sum-to-zero coded linear
-design used for \code{lm}/\code{glm}.
+design objects for SHAP summaries, and the treatment-coded linear design
+used for \code{lm}/\code{glm}.
 }
 \description{
 Creates a cleaned modeling frame, full one-hot main-effect design,
 full dummy-by-dummy interaction design restricted to pairs of different
-variable groups, and a separate sum-to-zero coded linear design used by
+variable groups, and a regular treatment-coded linear design used by
 \code{lm}/\code{glm}.
 }
 \details{
-For xgboost models, only the main one-hot feature matrix is used as model
-input. Interactions for xgboost are obtained from native TreeSHAP interaction
-values, not by feeding explicit interaction columns into the model.
+For linear models, the first level of each factor is treated as the
+reference level. For xgboost models, only the main one-hot feature matrix is
+used as model input. Interactions for xgboost are obtained from native
+TreeSHAP interaction values, not by feeding explicit interaction columns
+into the model.
 }
